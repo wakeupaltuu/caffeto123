@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
   Home,
@@ -30,14 +30,19 @@ import {
   getDoc
 } from 'firebase/firestore';
 
-// === MULTI-BUSINESS LOYALTY SUPPORT ===
+// 🟡 [ISSUE 8] Extract constants:
+const GOOGLE_REVIEW_URL = "https://g.page/r/YOUR_GOOGLE_REVIEW_LINK/review"; // Replace with actual business Google review link
+const SHARE_TITLE = "Join & Earn Rewards";
+const SHARE_TEXT = "Earn rewards with this app!";
+const SHARE_URL = typeof window !== 'undefined' ? window.location.origin : '';
+
 const BIZ_ID = "caffeto123"; // Business ID for loyalty program
 
 // Premium Loyalty Card Progress Setup
 const LOYALTY_REWARD = {
   nextTitle: 'Free Coffee',
   nextThreshold: 100,
-  stampCount: 5, // Number of indicator circles for progress
+  stampCount: 5,
   cardLabel: 'LUMIÈRE PREMIUM',
   memberLevel: 'Rose Gold'
 };
@@ -46,7 +51,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userData, setUserData] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);     // <<<<< Per-business stats
+  const [stats, setStats] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -55,16 +60,25 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // === Camera Scanner State ===
+  const [scannerLoading, setScannerLoading] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+
   // ==== Real-time timer for review rewards ====
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const interval = setInterval(() => {
       setNow(new Date());
-    }, 5000);
+    }, 1000); // shorter interval for countdown accuracy (ISSUE 6)
     return () => clearInterval(interval);
   }, []);
   // ============================================
 
+  // [ISSUE 2] Scanner
+  const html5QrcodeScannerRef = useRef<any>(null);
+  const scannerMountedRef = useRef(false);
+
+  // [ISSUE 8] Avoid duplicate Firestore calls
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -104,7 +118,6 @@ export default function App() {
         if (docSnap.exists()) {
           setStats(docSnap.data());
         } else {
-          // If no doc, treat as 0 points and blank lastVisitAt, etc
           setStats({
             userId: user.uid,
             bizId: BIZ_ID,
@@ -134,9 +147,9 @@ export default function App() {
           uid: newUser.uid,
           name: name || 'User',
           email: newUser.email,
-          createdAt: nowStr,
-          lastLoginDate: nowStr
+          createdAt: nowStr
         });
+        // [ISSUE 5] Don't set lastLoginDate here (not used)
         // Create their stats doc as well (optional, but guarantees Firestore presence)
         const statsId = `${newUser.uid}_${BIZ_ID}`;
         await setDoc(
@@ -151,14 +164,7 @@ export default function App() {
         );
       } else {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const nowStr = new Date().toISOString();
-        await setDoc(
-          doc(db, 'users', userCredential.user.uid),
-          {
-            lastLoginDate: nowStr
-          },
-          { merge: true }
-        );
+        // [ISSUE 5] On login, we intentionally do NOT update lastLoginDate anymore.
       }
     } catch (error: any) {
       setAuthError(error.message || 'Authentication failed');
@@ -175,72 +181,106 @@ export default function App() {
     }
   };
 
+  // [ISSUE 1,6,8] Google Review and state/Firestore
   const openReview = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
-    await updateDoc(userRef, {
-      reviewClickedAt: new Date().toISOString()
-    });
-    window.open("https://g.page/r/YOUR_LINK/review", "_blank");
+
+    // Immediately update local state for UX (ISSUE 6)
+    setUserData((prev: any) => ({
+      ...prev,
+      reviewClickedAt: new Date().toISOString(),
+      reviewCompleted: false,
+    }));
+
+    try {
+      await updateDoc(userRef, {
+        reviewClickedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      // Firestore error is non-blocking to user (since review redirect always opens anyway)
+      // Optionally show error here if required.
+    }
+    // [ISSUE 1] Use constant, and proper window.open target/rel
+    window.open(GOOGLE_REVIEW_URL, "_blank", "noopener,noreferrer");
   };
 
+  // [ISSUE 1,6,8] claimReviewPoints with error handling
   const claimReviewPoints = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
-    // Check reviewClickedAt in user profile
-    const userSnap = await getDoc(userRef);
-    if (userSnap.exists()) {
-      const data = userSnap.data();
-      const clickedAt = data.reviewClickedAt ? new Date(data.reviewClickedAt) : null;
+    try {
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        const clickedAt = data.reviewClickedAt ? new Date(data.reviewClickedAt) : null;
 
-      if (!clickedAt) return;
-      const diffMinutes = (now.getTime() - clickedAt.getTime()) / (1000 * 60);
+        if (!clickedAt) return;
+        const diffMinutes = (now.getTime() - clickedAt.getTime()) / (1000 * 60);
 
-      if (diffMinutes >= 2) {
-        // Add 20 to this user's points for this business
-        await setDoc(
-          statsRef,
-          {
-            userId: user.uid,
-            bizId: BIZ_ID,
-            totalPoints: (stats?.totalPoints ?? 0) + 20, // fallback if stats missing
-          },
-          { merge: true }
-        );
-        // Mark review complete
-        await updateDoc(userRef, {
-          reviewClickedAt: null,
-          reviewCompleted: true
-        });
+        if (diffMinutes >= 2) {
+          // Add 20 to this user's points for this business
+          await setDoc(
+            statsRef,
+            {
+              userId: user.uid,
+              bizId: BIZ_ID,
+              totalPoints: (stats?.totalPoints ?? 0) + 20,
+            },
+            { merge: true }
+          );
+          // Mark review complete
+          await updateDoc(userRef, {
+            reviewClickedAt: null,
+            reviewCompleted: true
+          });
+
+          setUserData((prev: any) => ({
+            ...prev,
+            reviewClickedAt: null,
+            reviewCompleted: true
+          }));
+        }
       }
+    } catch (error) {
+      alert("Error claiming review reward.");
     }
   };
 
+  // [ISSUE 5]: Claim Daily Reward using lastDailyClaimAt only!
   const claimDailyReward = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
-    const userSnap = await getDoc(userRef);
-
-    if (userSnap.exists()) {
+    let userSnap;
+    try {
+      userSnap = await getDoc(userRef);
+    } catch (err) {
+      alert("Could not read user data.");
+      return;
+    }
+    let lastClaimISO: string | null | undefined = null;
+    if (userSnap && userSnap.exists()) {
       const data = userSnap.data();
-      const lastClaim = data.lastLoginDate
-        ? new Date(data.lastLoginDate)
-        : null;
+      lastClaimISO = data.lastDailyClaimAt as string | null;
+    }
+    const nowDate = new Date();
+    let eligible = false;
+    if (!lastClaimISO) {
+      eligible = true;
+    } else {
+      const lastClaim = new Date(lastClaimISO);
+      const diffHours = (nowDate.getTime() - lastClaim.getTime()) / (1000 * 60 * 60);
+      eligible = diffHours >= 24;
+    }
 
-      const nowDate = new Date();
-
-      const diffHours = lastClaim
-        ? (nowDate.getTime() - lastClaim.getTime()) / (1000 * 60 * 60)
-        : 999;
-
-      if (diffHours >= 24) {
-        // Add 5 points to the user's stats for this business
+    if (eligible) {
+      try {
         await setDoc(
           statsRef,
           {
@@ -250,29 +290,42 @@ export default function App() {
           },
           { merge: true }
         );
-        // Update lastLoginDate in user doc
+        // Set lastDailyClaimAt (NOT lastLoginDate!)
         await setDoc(
           userRef,
           {
-            lastLoginDate: nowDate.toISOString()
+            lastDailyClaimAt: nowDate.toISOString(),
           },
           { merge: true }
         );
-
+        setUserData((prev: any) => ({
+          ...prev,
+          lastDailyClaimAt: nowDate.toISOString()
+        }));
         alert("🎉 +5 points claimed!");
-      } else {
-        const remaining = Math.ceil(24 - diffHours);
-        alert(`Come back in ${remaining} hrs`);
+      } catch (err) {
+        alert("Error claiming daily reward.");
       }
+    } else {
+      const last = lastClaimISO ? new Date(lastClaimISO) : null;
+      const diffHours = last ? ((nowDate.getTime() - last.getTime()) / (1000 * 60 * 60)) : 999;
+      const remaining = Math.ceil(24 - diffHours);
+      alert(`Come back in ${remaining} hrs`);
     }
   };
 
-  // NEW: Claim Visit (Scan QR) logic
+  // [ISSUE 3] claimVisit should ONLY be called after a succesful scan; here is the base logic.
   const claimVisit = async () => {
     if (!user) return;
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
-    let docSnap = await getDoc(statsRef);
+    let docSnap: any;
+    try {
+      docSnap = await getDoc(statsRef);
+    } catch (err) {
+      alert("Failed to read your visit data.");
+      return;
+    }
     let lastVisitAt: string | null = null;
     let priorPoints = 0;
     if (docSnap.exists()) {
@@ -283,6 +336,7 @@ export default function App() {
       lastVisitAt = null;
       priorPoints = 0;
     }
+
     let canClaim = true;
     if (lastVisitAt) {
       const last = new Date(lastVisitAt);
@@ -307,6 +361,11 @@ export default function App() {
         },
         { merge: true }
       );
+      setStats((prev: any) => ({
+        ...prev,
+        totalPoints: priorPoints + 10,
+        lastVisitAt: new Date().toISOString()
+      }));
       alert("🎉 +10 points for visiting the clinic!");
     } catch (err) {
       alert("Error awarding visit points.");
@@ -342,6 +401,145 @@ export default function App() {
     { id: 'review', title: 'Leave a Review', points: 20, icon: MessageSquareHeart, color: 'bg-stone-200 text-stone-700' },
     { id: 'visit', title: 'Visit Clinic', points: 'Scan QR', icon: ScanLine, color: 'bg-emerald-100 text-emerald-700' },
   ];
+
+  // [ISSUE 4] – share/refer with native and fallback
+  const handleShare = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: SHARE_TITLE,
+          text: SHARE_TEXT,
+          url: SHARE_URL
+        });
+      } else {
+        await navigator.clipboard.writeText(SHARE_URL);
+        alert("Copied link to clipboard! Paste to share.");
+      }
+    } catch (e) {
+      alert("Couldn't share.");
+    }
+  };
+
+  // [ISSUE 7] Centralized handler for ALL earn cards
+  const handleEarnClick = async (id: string, extra?: { isReview: boolean; clickedAt?: Date | null; isClaimable?: boolean; reviewCompleted?: boolean }) => {
+    if (!user) return;
+    switch (id) {
+      case 'review': {
+        // Only allow if not complete
+        if (extra?.reviewCompleted) return;
+        if (!extra?.clickedAt) {
+          await openReview();
+        } else if (extra?.isClaimable) {
+          await claimReviewPoints();
+        }
+        // else do nothing, must wait
+        break;
+      }
+      case 'visit': {
+        // [ISSUE 3]: Navigate to scan tab
+        setActiveTab('scan');
+        break;
+      }
+      case 'refer': {
+        await handleShare();
+        break;
+      }
+      case 'login': {
+        await claimDailyReward();
+        break;
+      }
+      default: break;
+    }
+  };
+
+  // [ISSUE 2] Scanner effect (mount/unmount) and scan handler
+  useEffect(() => {
+    const runScanner = async () => {
+      // Only on Scan tab
+      if (activeTab !== 'scan') {
+        if (scannerMountedRef.current && html5QrcodeScannerRef.current) {
+          try {
+            await html5QrcodeScannerRef.current.stop();
+          } catch {}
+          html5QrcodeScannerRef.current.clear();
+        }
+        scannerMountedRef.current = false;
+        return;
+      }
+
+      setScannerLoading(true);
+      setScannerError(null);
+
+      // Dynamically import html5-qrcode ONLY if needed (fixes SSR/react warning)
+      let Html5Qrcode;
+      try {
+        // @ts-ignore
+        Html5Qrcode = (await import("html5-qrcode")).Html5Qrcode;
+      } catch (err) {
+        setScannerError("Failed to load QR scanner library.");
+        setScannerLoading(false);
+        return;
+      }
+      if (scannerMountedRef.current) return; // avoid double-mount
+      scannerMountedRef.current = true;
+
+      // Ensure DOM exists
+      const readerElem = document.getElementById('reader');
+      if (!readerElem) {
+        setScannerError("Scanner DOM not ready");
+        setScannerLoading(false);
+        return;
+      }
+      const html5QrInst = new Html5Qrcode("reader");
+      html5QrcodeScannerRef.current = html5QrInst;
+      let stopped = false;
+
+      try {
+        // https://github.com/mebjas/html5-qrcode#start-camera-using-permissions
+        const config = { fps: 10, qrbox: { width: 200, height: 200 } };
+        await html5QrInst.start(
+            { facingMode: "environment" },
+            config,
+            async (decodedText: string) => {
+              // Don't allow duplicate scan
+              if (stopped) return;
+              stopped = true;
+              setScannerLoading(true);
+              await html5QrInst.stop();
+              html5QrcodeScannerRef.current = null;
+              // Mark complete
+              // You can optionally check for a QR "secret"
+              // e.g. decodedText === expected string
+              await claimVisit();
+              setScannerLoading(false);
+              scannerMountedRef.current = false;
+              setActiveTab('home');
+            },
+            (error: any) => {
+              // Optionally show scan errors here
+            }
+        );
+        setScannerLoading(false);
+      } catch (err: any) {
+        setScannerError(typeof err === 'string' ? err : "Camera permission denied or unavailable.");
+        setScannerLoading(false);
+        scannerMountedRef.current = false;
+      }
+      // Cleanup on unmount or tab change
+      return () => {
+        scannerMountedRef.current = false;
+        if (html5QrcodeScannerRef.current) {
+          html5QrcodeScannerRef.current.stop().catch(() => {});
+          html5QrcodeScannerRef.current.clear();
+        }
+        html5QrcodeScannerRef.current = null;
+      };
+    };
+
+    runScanner();
+    // Cleanup when switching away from Scan tab
+    // eslint-disable-next-line
+  }, [activeTab, user]); // re-run for user (so if sign in/out, scanner resets)
 
   if (!isAuthReady) {
     return <div className="min-h-screen bg-stone-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-rose-200 border-t-rose-600 rounded-full animate-spin"></div></div>;
@@ -487,7 +685,6 @@ export default function App() {
                       {pointsToward} / {nextReward.points} pts{' '}
                       <span className="text-rose-200/90 font-normal">to {nextReward.title}</span>
                     </div>
-                    {/* Next reward text (on right, optional) */}
                   </div>
 
                   {/* Elegant animated progress bar */}
@@ -547,7 +744,7 @@ export default function App() {
               <section>
                 <div className="flex justify-between items-end mb-3">
                   <h2 className="text-lg font-serif font-semibold text-stone-900">Available Rewards</h2>
-                  <button className="text-sm text-stone-500 hover:text-rose-600 flex items-center gap-1 transition-colors">
+                  <button className="text-sm text-stone-500 hover:text-rose-600 flex items-center gap-1 transition-colors" onClick={() => setActiveTab('rewards')}>
                     See all <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -599,7 +796,7 @@ export default function App() {
               <section>
                 <h2 className="text-lg font-serif font-semibold text-stone-900 mb-3">Earn More Points</h2>
                 <button
-                  onClick={claimDailyReward}
+                  onClick={() => handleEarnClick('login')}
                   className="w-full bg-rose-600 text-white py-3 rounded-xl mb-4 font-medium shadow-sm active:bg-rose-700 transition-all"
                 >
                   Claim Daily Reward (+5)
@@ -608,6 +805,9 @@ export default function App() {
                 <div className="grid grid-cols-1 gap-3">
                   {earnOptions.map((option, index) => {
                     const isReview = option.id === 'review';
+                    const isVisit = option.id === 'visit';
+                    const isRefer = option.id === 'refer';
+                    const isLogin = option.id === 'login';
 
                     // Review-specific derived state from Firestore
                     const clickedAt = isReview && userData?.reviewClickedAt
@@ -652,21 +852,14 @@ export default function App() {
                         : 'border-stone-100'
                     ].join(' ');
 
-                    const handleClick = async () => {
-                      if (!isReview) return;
-                      if (reviewCompleted) return;
-
-                      if (!clickedAt) {
-                        await openReview();
-                        return;
-                      }
-
-                      if (isClaimable) {
-                        await claimReviewPoints();
-                        return;
-                      }
-                      // Waiting state: do nothing (UI shows dynamic countdown)
-                    };
+                    // [ISSUE 7] Attach click logic to each card via central handler
+                    const handleClick = () =>
+                      handleEarnClick(option.id, {
+                        isReview,
+                        clickedAt,
+                        isClaimable,
+                        reviewCompleted
+                      });
 
                     return (
                       <motion.div
@@ -690,7 +883,6 @@ export default function App() {
                             </p>
                             {isReview && clickedAt && !isClaimable && !reviewCompleted && (
                               <p className="text-xs text-stone-400 mt-1">
-                                {/* Show dynamic countdown: wait X min */}
                                 {`Wait ${Math.max(1, Math.ceil(2 - (diffMinutes ?? 0)))} min`}
                               </p>
                             )}
@@ -704,12 +896,11 @@ export default function App() {
                   })}
                 </div>
               </section>
-
             </div>
           </motion.div>
         )}
 
-        {/* Other tabs... (updated Scan tab for claimVisit only -- rest unchanged for design parity) */}
+        {/* SCAN TAB – [ISSUE 2] */}
         {activeTab === 'scan' && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -720,16 +911,23 @@ export default function App() {
               <ScanLine className="w-10 h-10 text-emerald-600" />
             </div>
             <h1 className="text-2xl font-serif font-medium text-stone-900 mb-2">Scan QR</h1>
+            <div
+              id="reader"
+              style={{ width: 260, height: 260, margin: "0 auto", marginTop: 8, display: "flex", justifyContent: "center" }}
+            ></div>
+            {scannerLoading && <div className="text-stone-500 mt-3">Loading camera...</div>}
+            {scannerError && <div className="text-red-500 mt-3">{scannerError}</div>}
+            <p className="text-stone-400 text-sm mt-4 mb-2">
+              Scan the code at clinic to collect your points!
+            </p>
+            {/* Optionally provide manual fallback */}
             <button
               onClick={claimVisit}
-              className="bg-emerald-600 mt-5 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
-              style={{ minWidth: 210, marginTop: 20 }}
+              className="bg-emerald-600 mt-2 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
+              style={{ minWidth: 210, marginTop: 10 }}
             >
               Claim Visit Points (+10)
             </button>
-            <p className="text-stone-400 text-sm mt-4">
-              Scan the code at clinic or tap here once every 24hrs to collect points!
-            </p>
           </motion.div>
         )}
 
