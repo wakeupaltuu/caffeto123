@@ -1,0 +1,854 @@
+import { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import {
+  Home,
+  ScanLine,
+  Gift,
+  User,
+  ChevronRight,
+  Sparkles,
+  CalendarCheck,
+  MessageSquareHeart,
+  Users,
+  Lock,
+  Unlock,
+  LogOut
+} from 'lucide-react';
+import { auth, db } from './firebase';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import {
+  doc,
+  setDoc,
+  onSnapshot,
+  updateDoc,
+  getDoc
+} from 'firebase/firestore';
+
+// === MULTI-BUSINESS LOYALTY SUPPORT ===
+const BIZ_ID = "caffeto123"; // Business ID for loyalty program
+
+// Premium Loyalty Card Progress Setup
+const LOYALTY_REWARD = {
+  nextTitle: 'Free Coffee',
+  nextThreshold: 100,
+  stampCount: 5, // Number of indicator circles for progress
+  cardLabel: 'LUMIÈRE PREMIUM',
+  memberLevel: 'Rose Gold'
+};
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('home');
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [userData, setUserData] = useState<any>(null);
+  const [stats, setStats] = useState<any>(null);     // <<<<< Per-business stats
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // ==== Real-time timer for review rewards ====
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(new Date());
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+  // ============================================
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to user profile for name and review data, but NOT points (points are now in userBusinessStats)
+  useEffect(() => {
+    if (user && isAuthReady) {
+      const unsubscribe = onSnapshot(
+        doc(db, 'users', user.uid),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            setUserData(docSnap.data());
+          } else {
+            setUserData(null);
+          }
+        },
+        (error) => {
+          console.error("Firestore Error:", error);
+        }
+      );
+      return () => unsubscribe();
+    } else {
+      setUserData(null);
+    }
+  }, [user, isAuthReady]);
+
+  // Listen to userBusinessStats for points etc
+  useEffect(() => {
+    if (user && isAuthReady) {
+      const statsId = `${user.uid}_${BIZ_ID}`;
+      const statsRef = doc(db, 'userBusinessStats', statsId);
+      const unsubscribe = onSnapshot(statsRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setStats(docSnap.data());
+        } else {
+          // If no doc, treat as 0 points and blank lastVisitAt, etc
+          setStats({
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: 0,
+            lastVisitAt: ""
+          });
+        }
+      }, (error) => {
+        console.error("Stats Firestore Error:", error);
+      });
+      return () => unsubscribe();
+    } else {
+      setStats(null);
+    }
+  }, [user, isAuthReady]);
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsLoading(true);
+    try {
+      if (authMode === 'signup') {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const newUser = userCredential.user;
+        const nowStr = new Date().toISOString();
+        await setDoc(doc(db, 'users', newUser.uid), {
+          uid: newUser.uid,
+          name: name || 'User',
+          email: newUser.email,
+          createdAt: nowStr,
+          lastLoginDate: nowStr
+        });
+        // Create their stats doc as well (optional, but guarantees Firestore presence)
+        const statsId = `${newUser.uid}_${BIZ_ID}`;
+        await setDoc(
+          doc(db, 'userBusinessStats', statsId),
+          {
+            userId: newUser.uid,
+            bizId: BIZ_ID,
+            totalPoints: 0,
+            lastVisitAt: ""
+          },
+          { merge: true }
+        );
+      } else {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const nowStr = new Date().toISOString();
+        await setDoc(
+          doc(db, 'users', userCredential.user.uid),
+          {
+            lastLoginDate: nowStr
+          },
+          { merge: true }
+        );
+      }
+    } catch (error: any) {
+      setAuthError(error.message || 'Authentication failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout Error:", error);
+    }
+  };
+
+  const openReview = async () => {
+    if (!user) return;
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      reviewClickedAt: new Date().toISOString()
+    });
+    window.open("https://g.page/r/YOUR_LINK/review", "_blank");
+  };
+
+  const claimReviewPoints = async () => {
+    if (!user) return;
+    const userRef = doc(db, 'users', user.uid);
+    const statsId = `${user.uid}_${BIZ_ID}`;
+    const statsRef = doc(db, 'userBusinessStats', statsId);
+
+    // Check reviewClickedAt in user profile
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      const clickedAt = data.reviewClickedAt ? new Date(data.reviewClickedAt) : null;
+
+      if (!clickedAt) return;
+      const diffMinutes = (now.getTime() - clickedAt.getTime()) / (1000 * 60);
+
+      if (diffMinutes >= 2) {
+        // Add 20 to this user's points for this business
+        await setDoc(
+          statsRef,
+          {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: (stats?.totalPoints ?? 0) + 20, // fallback if stats missing
+          },
+          { merge: true }
+        );
+        // Mark review complete
+        await updateDoc(userRef, {
+          reviewClickedAt: null,
+          reviewCompleted: true
+        });
+      }
+    }
+  };
+
+  const claimDailyReward = async () => {
+    if (!user) return;
+    const userRef = doc(db, 'users', user.uid);
+    const statsId = `${user.uid}_${BIZ_ID}`;
+    const statsRef = doc(db, 'userBusinessStats', statsId);
+
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      const lastClaim = data.lastLoginDate
+        ? new Date(data.lastLoginDate)
+        : null;
+
+      const nowDate = new Date();
+
+      const diffHours = lastClaim
+        ? (nowDate.getTime() - lastClaim.getTime()) / (1000 * 60 * 60)
+        : 999;
+
+      if (diffHours >= 24) {
+        // Add 5 points to the user's stats for this business
+        await setDoc(
+          statsRef,
+          {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: (stats?.totalPoints ?? 0) + 5,
+          },
+          { merge: true }
+        );
+        // Update lastLoginDate in user doc
+        await setDoc(
+          userRef,
+          {
+            lastLoginDate: nowDate.toISOString()
+          },
+          { merge: true }
+        );
+
+        alert("🎉 +5 points claimed!");
+      } else {
+        const remaining = Math.ceil(24 - diffHours);
+        alert(`Come back in ${remaining} hrs`);
+      }
+    }
+  };
+
+  // NEW: Claim Visit (Scan QR) logic
+  const claimVisit = async () => {
+    if (!user) return;
+    const statsId = `${user.uid}_${BIZ_ID}`;
+    const statsRef = doc(db, 'userBusinessStats', statsId);
+    let docSnap = await getDoc(statsRef);
+    let lastVisitAt: string | null = null;
+    let priorPoints = 0;
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      lastVisitAt = data.lastVisitAt || null;
+      priorPoints = data.totalPoints ?? 0;
+    } else {
+      lastVisitAt = null;
+      priorPoints = 0;
+    }
+    let canClaim = true;
+    if (lastVisitAt) {
+      const last = new Date(lastVisitAt);
+      const diffHours = (new Date().getTime() - last.getTime()) / (1000 * 60 * 60);
+      if (diffHours < 24) {
+        canClaim = false;
+      }
+    }
+    if (!canClaim) {
+      alert("You can only claim a visit reward once every 24 hours. Try again later!");
+      return;
+    }
+    // Award 10 points and update lastVisitAt
+    try {
+      await setDoc(
+        statsRef,
+        {
+          userId: user.uid,
+          bizId: BIZ_ID,
+          totalPoints: priorPoints + 10,
+          lastVisitAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
+      alert("🎉 +10 points for visiting the clinic!");
+    } catch (err) {
+      alert("Error awarding visit points.");
+    }
+  };
+
+  // ----------- Premium Loyalty Card Calculations ------------
+  const userPoints = stats?.totalPoints ?? 0;
+  const userName = userData?.name || 'User';
+
+  // Next reward (find first reward user doesn't yet have, fallback to 'next reward' setup)
+  const rewards = [
+    { id: 1, title: 'Free Blowout', points: 300, image: 'https://images.unsplash.com/photo-1562322140-8baeececf3df?q=80&w=500&auto=format&fit=crop' },
+    { id: 2, title: 'Signature Facial', points: 500, image: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?q=80&w=500&auto=format&fit=crop' },
+    { id: 3, title: 'Full Balayage', points: 1000, image: 'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?q=80&w=500&auto=format&fit=crop' },
+  ];
+
+  const nextReward =
+    rewards.find(r => r.points > userPoints) ||
+    { points: LOYALTY_REWARD.nextThreshold, title: LOYALTY_REWARD.nextTitle };
+
+  const pointsToward = Math.min(userPoints, nextReward.points);
+  const pointsNeeded = nextReward.points - userPoints > 0 ? nextReward.points - userPoints : 0;
+  const progress = Math.min(userPoints / nextReward.points, 1);
+
+  // Stamps (5 circles - fill as progress grows)
+  const stampCount = LOYALTY_REWARD.stampCount;
+  const stampsFilled = Math.floor(progress * stampCount);
+
+  const earnOptions = [
+    { id: 'refer', title: 'Refer a Friend', points: 50, icon: Users, color: 'bg-rose-100 text-rose-700' },
+    { id: 'login', title: 'Daily Login', points: 5, icon: CalendarCheck, color: 'bg-amber-100 text-amber-700' },
+    { id: 'review', title: 'Leave a Review', points: 20, icon: MessageSquareHeart, color: 'bg-stone-200 text-stone-700' },
+    { id: 'visit', title: 'Visit Clinic', points: 'Scan QR', icon: ScanLine, color: 'bg-emerald-100 text-emerald-700' },
+  ];
+
+  if (!isAuthReady) {
+    return <div className="min-h-screen bg-stone-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-rose-200 border-t-rose-600 rounded-full animate-spin"></div></div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-stone-50 font-sans text-stone-800 flex justify-center">
+        <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative overflow-hidden flex flex-col justify-center p-8">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
+          <div className="absolute bottom-0 left-0 w-40 h-40 bg-amber-500/10 rounded-full blur-2xl -ml-10 -mb-10 pointer-events-none"></div>
+
+          <div className="relative z-10">
+            <div className="w-16 h-16 bg-rose-50 rounded-2xl flex items-center justify-center mb-8">
+              <Sparkles className="w-8 h-8 text-rose-600" />
+            </div>
+            <h1 className="text-3xl font-serif font-medium text-stone-900 mb-2">
+              {authMode === 'login' ? 'Welcome back' : 'Create account'}
+            </h1>
+            <p className="text-stone-500 mb-8">
+              {authMode === 'login' ? 'Sign in to access your rewards' : 'Join Lumière Rewards today'}
+            </p>
+
+            <form onSubmit={handleAuth} className="space-y-4">
+              {authMode === 'signup' && (
+                <div>
+                  <label className="block text-xs font-medium text-stone-500 uppercase tracking-wider mb-1">Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                    placeholder="Eleanor Shellstrop"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-stone-500 uppercase tracking-wider mb-1">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                  placeholder="eleanor@example.com"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-500 uppercase tracking-wider mb-1">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                  placeholder="••••••••"
+                />
+              </div>
+
+              {authError && <p className="text-sm text-red-500">{authError}</p>}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3.5 rounded-xl bg-stone-900 text-white font-medium hover:bg-stone-800 transition-all shadow-md disabled:opacity-70"
+              >
+                {isLoading ? 'Please wait...' : (authMode === 'login' ? 'Sign In' : 'Sign Up')}
+              </button>
+            </form>
+
+            <div className="mt-8 text-center">
+              <button
+                onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                className="text-sm text-stone-500 hover:text-stone-900 transition-colors"
+              >
+                {authMode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-stone-50 font-sans text-stone-800 pb-24 flex justify-center">
+      <div className="w-full max-w-md bg-stone-50 min-h-screen shadow-2xl relative overflow-hidden">
+
+        {activeTab === 'home' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="pb-6"
+          >
+            {/* Header & Premium Loyalty Card */}
+            <div className="p-5 pt-10 bg-white rounded-b-[2.5rem] shadow-sm relative z-10">
+              {/* Top Row */}
+              <div className="flex justify-between items-center mb-5">
+                <div>
+                  <p className="text-xs text-stone-400 uppercase tracking-widest mb-0.5">Welcome back</p>
+                  <h1 className="text-xl sm:text-2xl font-serif font-semibold text-stone-900">{userName}</h1>
+                </div>
+                <div className="w-10 h-10 rounded-full overflow-hidden border border-rose-100 bg-stone-100">
+                  <img
+                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop"
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              </div>
+
+              {/* Apple Wallet Style Premium Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="relative overflow-hidden rounded-2xl md:rounded-3xl shadow-xl px-5 py-6 mt-1 mb-2 bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900"
+                style={{
+                  border: '1.5px solid #ece4e1',
+                  boxShadow: '0 6px 22px 0 rgba(42,8,28,0.09)',
+                }}
+              >
+                <div className="absolute top-0 left-0 w-32 h-32 bg-rose-500/10 rounded-full blur-3xl -translate-x-12 -translate-y-10" />
+                <div className="absolute bottom-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl translate-x-10 translate-y-8" />
+                <div className="flex flex-col relative z-10">
+                  {/* Card Label/Brand */}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="uppercase text-xs font-medium tracking-wide text-stone-300/90">{LOYALTY_REWARD.cardLabel}</span>
+                    <Sparkles className="w-4 h-4 text-rose-200 opacity-80" />
+                  </div>
+
+                  {/* Points Large */}
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-3xl sm:text-4xl font-serif font-semibold tracking-tight text-white">{userPoints}</span>
+                    <span className="text-base font-medium text-rose-200/80 opacity-90">pts</span>
+                  </div>
+
+                  {/* Progress bar & amount toward next */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-medium text-white/80">
+                      {pointsToward} / {nextReward.points} pts{' '}
+                      <span className="text-rose-200/90 font-normal">to {nextReward.title}</span>
+                    </div>
+                    {/* Next reward text (on right, optional) */}
+                  </div>
+
+                  {/* Elegant animated progress bar */}
+                  <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden mb-4">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.floor(progress * 100)}%` }}
+                      transition={{ delay: 0.4, duration: 1.1 }}
+                      className="h-full bg-gradient-to-r from-rose-300 to-rose-400 rounded-full shadow-sm"
+                    />
+                  </div>
+
+                  {/* Subtle Stamp/Circle Progress Indicators */}
+                  <div className="flex items-center gap-2 justify-end">
+                    {[...Array(stampCount)].map((_, i) => (
+                      <span
+                        key={i}
+                        className={`inline-block rounded-full transition-all duration-300`}
+                        style={{
+                          width: 16,
+                          height: 16,
+                          background:
+                            i < stampsFilled
+                              ? 'linear-gradient(to right, #ffa69e 65%, #ffd6d6 100%)'
+                              : 'rgba(255,255,255,0.28)',
+                          border:
+                            i < stampsFilled
+                              ? '1.5px solid #f9c7b5'
+                              : '1.5px solid rgba(255,255,255,.18)',
+                          boxShadow: i < stampsFilled ? '0 0 0 1.5px #f9c7b588' : undefined,
+                        }}
+                        aria-label={i < stampsFilled ? "Full stamp" : "Empty stamp"}
+                      ></span>
+                    ))}
+                  </div>
+
+                  {/* Member Level and minimal status */}
+                  <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-stone-400/90 font-medium">
+                    <span>{LOYALTY_REWARD.memberLevel} Member</span>
+                    {pointsNeeded > 0 ? (
+                      <span>
+                        <span className="font-semibold text-white">{pointsNeeded}</span>
+                        <span className="ml-1">pts to {nextReward.title}</span>
+                      </span>
+                    ) : (
+                      <span className="text-rose-200 font-semibold">Reward Ready!</span>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+
+            {/* Main Content */}
+            <div className="p-5 space-y-8">
+
+              {/* Rewards Section */}
+              <section>
+                <div className="flex justify-between items-end mb-3">
+                  <h2 className="text-lg font-serif font-semibold text-stone-900">Available Rewards</h2>
+                  <button className="text-sm text-stone-500 hover:text-rose-600 flex items-center gap-1 transition-colors">
+                    See all <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex gap-4 overflow-x-auto pb-4 -mx-5 px-5 snap-x hide-scrollbar">
+                  {rewards.map((reward, index) => {
+                    const isUnlocked = userPoints >= reward.points;
+                    return (
+                      <motion.div
+                        key={reward.id}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.09 }}
+                        className={`min-w-[185px] max-w-[185px] snap-start rounded-xl overflow-hidden relative shadow border ${isUnlocked ? 'border-rose-100 bg-white' : 'border-stone-100 bg-stone-50/50'}`}
+                      >
+                        <div className="h-24 overflow-hidden relative">
+                          <img
+                            src={reward.image}
+                            alt={reward.title}
+                            className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${!isUnlocked ? 'grayscale opacity-60' : ''}`}
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+                          <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full text-white text-[11px] font-medium shadow">
+                            {isUnlocked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                            {reward.points} pts
+                          </div>
+                        </div>
+                        <div className="p-3 pb-3.5">
+                          <h3 className={`font-medium mb-1 text-base truncate ${isUnlocked ? 'text-stone-900' : 'text-stone-500'}`}>{reward.title}</h3>
+                          <button
+                            disabled={!isUnlocked}
+                            className={`w-full py-2 rounded-lg text-[13px] font-semibold transition-all mt-1.5
+                              ${isUnlocked
+                                ? 'bg-stone-900 text-white hover:bg-stone-800 shadow'
+                                : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`
+                            }
+                          >
+                            {isUnlocked ? 'Redeem' : 'Locked'}
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* Earn Points Section */}
+              <section>
+                <h2 className="text-lg font-serif font-semibold text-stone-900 mb-3">Earn More Points</h2>
+                <button
+                  onClick={claimDailyReward}
+                  className="w-full bg-rose-600 text-white py-3 rounded-xl mb-4 font-medium shadow-sm active:bg-rose-700 transition-all"
+                >
+                  Claim Daily Reward (+5)
+                </button>
+
+                <div className="grid grid-cols-1 gap-3">
+                  {earnOptions.map((option, index) => {
+                    const isReview = option.id === 'review';
+
+                    // Review-specific derived state from Firestore
+                    const clickedAt = isReview && userData?.reviewClickedAt
+                      ? new Date(userData.reviewClickedAt)
+                      : null;
+                    const reviewCompleted = isReview ? Boolean(userData?.reviewCompleted) : false;
+
+                    // Remove "const now = ..." local declarations; use 'now' from global timer state!
+                    const diffMinutes = clickedAt ? (now.getTime() - clickedAt.getTime()) / (1000 * 60) : null;
+                    const isClaimable = isReview && Boolean(clickedAt && diffMinutes !== null && diffMinutes >= 2 && !reviewCompleted);
+
+                    // Dynamic text
+                    const titleText = isReview
+                      ? reviewCompleted
+                        ? 'Completed'
+                        : isClaimable
+                          ? 'Claim Reward'
+                          : clickedAt
+                            ? 'Review Submitted'
+                            : 'Leave a Review'
+                      : option.title;
+
+                    const subtitleText = isReview
+                      ? reviewCompleted
+                        ? 'Reward Claimed ✅'
+                        : isClaimable
+                          ? '+20 points'
+                          : clickedAt
+                            ? `Come back in a moment...`
+                            : '+20 points'
+                      : (typeof option.points === 'number' ? `+${option.points} points` : option.points);
+
+                    // Styles
+                    const cardClassNames = [
+                      'bg-white p-4 rounded-2xl cursor-pointer border',
+                      isReview
+                        ? reviewCompleted
+                          ? 'opacity-80 border-emerald-200 bg-emerald-50'
+                          : isClaimable
+                            ? 'border-rose-300 ring-2 ring-rose-200'
+                            : 'border-stone-100'
+                        : 'border-stone-100'
+                    ].join(' ');
+
+                    const handleClick = async () => {
+                      if (!isReview) return;
+                      if (reviewCompleted) return;
+
+                      if (!clickedAt) {
+                        await openReview();
+                        return;
+                      }
+
+                      if (isClaimable) {
+                        await claimReviewPoints();
+                        return;
+                      }
+                      // Waiting state: do nothing (UI shows dynamic countdown)
+                    };
+
+                    return (
+                      <motion.div
+                        key={option.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.18 + index * 0.08 }}
+                        onClick={handleClick}
+                        className={cardClassNames}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-11 h-11 rounded-full flex items-center justify-center ${option.color}`}>
+                            <option.icon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h3 className={`font-medium leading-tight ${isReview && reviewCompleted ? 'text-emerald-700' : 'text-stone-900'} group-hover:text-rose-700 transition-colors text-[15px]`}>
+                              {titleText}
+                            </h3>
+                            <p className={`text-xs ${isReview && reviewCompleted ? 'text-emerald-700' : 'text-stone-500'}`}>
+                              {subtitleText}
+                            </p>
+                            {isReview && clickedAt && !isClaimable && !reviewCompleted && (
+                              <p className="text-xs text-stone-400 mt-1">
+                                {/* Show dynamic countdown: wait X min */}
+                                {`Wait ${Math.max(1, Math.ceil(2 - (diffMinutes ?? 0)))} min`}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={`w-7 h-7 rounded-full ${isReview && isClaimable ? 'bg-rose-50' : 'bg-stone-50'} flex items-center justify-center group-hover:bg-rose-50 transition-colors ml-auto`}>
+                          <ChevronRight className={`w-4 h-4 ${isReview && isClaimable ? 'text-rose-600' : 'text-stone-400'} group-hover:text-rose-600`} />
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </section>
+
+            </div>
+          </motion.div>
+        )}
+
+        {/* Other tabs... (updated Scan tab for claimVisit only -- rest unchanged for design parity) */}
+        {activeTab === 'scan' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 pt-24 flex flex-col items-center justify-center min-h-[70vh] text-center"
+          >
+            <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6">
+              <ScanLine className="w-10 h-10 text-emerald-600" />
+            </div>
+            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-2">Scan QR</h1>
+            <button
+              onClick={claimVisit}
+              className="bg-emerald-600 mt-5 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
+              style={{ minWidth: 210, marginTop: 20 }}
+            >
+              Claim Visit Points (+10)
+            </button>
+            <p className="text-stone-400 text-sm mt-4">
+              Scan the code at clinic or tap here once every 24hrs to collect points!
+            </p>
+          </motion.div>
+        )}
+
+        {activeTab === 'rewards' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 pt-16"
+          >
+            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-6">All Rewards</h1>
+            <div className="grid grid-cols-2 gap-4">
+              {rewards.map((reward, index) => {
+                const isUnlocked = userPoints >= reward.points;
+                return (
+                  <motion.div
+                    key={reward.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.08 }}
+                    className={`rounded-2xl overflow-hidden relative shadow-sm border ${isUnlocked ? 'border-stone-200 bg-white' : 'border-stone-100 bg-stone-50/50'}`}
+                  >
+                    <div className="h-24 overflow-hidden relative">
+                      <img
+                        src={reward.image}
+                        alt={reward.title}
+                        className={`w-full h-full object-cover ${!isUnlocked ? 'grayscale opacity-60' : ''}`}
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                      <div className="absolute bottom-2 left-2 flex items-center gap-1 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full text-white text-[10px] font-medium">
+                        {isUnlocked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                        {reward.points} pts
+                      </div>
+                    </div>
+                    <div className="p-3">
+                      <h3 className={`font-medium text-sm mb-2 truncate ${isUnlocked ? 'text-stone-900' : 'text-stone-500'}`}>{reward.title}</h3>
+                      <button
+                        disabled={!isUnlocked}
+                        className={`w-full py-1.5 rounded-lg text-xs font-medium transition-all ${
+                          isUnlocked
+                            ? 'bg-stone-900 text-white hover:bg-stone-800'
+                            : 'bg-stone-200 text-stone-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {isUnlocked ? 'Redeem' : 'Locked'}
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'profile' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 pt-16"
+          >
+            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-6">Profile</h1>
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-stone-100 flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-100">
+                  <img
+                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop"
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+                <div>
+                  <h2 className="text-lg font-medium text-stone-900">{userName}</h2>
+                  <p className="text-stone-500 text-sm">Rose Gold Member</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="w-full bg-white border border-stone-200 text-stone-700 py-3 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-stone-50 transition-colors"
+            >
+              <LogOut className="w-4 h-4" /> Sign Out
+            </button>
+          </motion.div>
+        )}
+
+        {/* Bottom Navigation */}
+        <div className="fixed bottom-0 left-0 right-0 flex justify-center z-50 pointer-events-none">
+          <div className="w-full max-w-md bg-white border-t border-stone-100 px-6 py-4 flex justify-between items-center rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] pointer-events-auto">
+            {[
+              { id: 'home', icon: Home, label: 'Home' },
+              { id: 'scan', icon: ScanLine, label: 'Scan' },
+              { id: 'rewards', icon: Gift, label: 'Rewards' },
+              { id: 'profile', icon: User, label: 'Profile' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="flex flex-col items-center gap-1 relative"
+              >
+                <div className={`p-2 rounded-xl transition-colors ${activeTab === tab.id ? 'bg-rose-50 text-rose-600' : 'text-stone-400 hover:text-stone-600'}`}>
+                  <tab.icon className="w-6 h-6" />
+                </div>
+                <span className={`text-[10px] font-medium ${activeTab === tab.id ? 'text-rose-600' : 'text-stone-400'}`}>
+                  {tab.label}
+                </span>
+                {activeTab === tab.id && (
+                  <motion.div
+                    layoutId="nav-indicator"
+                    className="absolute -top-4 w-1 h-1 bg-rose-600 rounded-full"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
