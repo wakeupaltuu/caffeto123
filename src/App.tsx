@@ -314,42 +314,15 @@ export default function App() {
     }
   };
 
-  // [ISSUE 3] claimVisit should ONLY be called after a succesful scan; here is the base logic.
   const claimVisit = async () => {
     if (!user) return;
+  
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
-    let docSnap: any;
-    try {
-      docSnap = await getDoc(statsRef);
-    } catch (err) {
-      alert("Failed to read your visit data.");
-      return;
-    }
-    let lastVisitAt: string | null = null;
-    let priorPoints = 0;
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      lastVisitAt = data.lastVisitAt || null;
-      priorPoints = data.totalPoints ?? 0;
-    } else {
-      lastVisitAt = null;
-      priorPoints = 0;
-    }
-
-    let canClaim = true;
-    if (lastVisitAt) {
-      const last = new Date(lastVisitAt);
-      const diffHours = (new Date().getTime() - last.getTime()) / (1000 * 60 * 60);
-      if (diffHours < 24) {
-        canClaim = false;
-      }
-    }
-    if (!canClaim) {
-      alert("You can only claim a visit reward once every 24 hours. Try again later!");
-      return;
-    }
-    // Award 10 points and update lastVisitAt
+  
+    // 🚀 Use current state (no Firestore read needed for testing)
+    const priorPoints = stats?.totalPoints ?? 0;
+  
     try {
       await setDoc(
         statsRef,
@@ -361,12 +334,14 @@ export default function App() {
         },
         { merge: true }
       );
+  
       setStats((prev: any) => ({
         ...prev,
         totalPoints: priorPoints + 10,
         lastVisitAt: new Date().toISOString()
       }));
-      alert("🎉 +10 points for visiting the clinic!");
+  
+      alert("🎉 +10 points for visiting!");
     } catch (err) {
       alert("Error awarding visit points.");
     }
