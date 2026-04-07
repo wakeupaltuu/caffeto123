@@ -304,17 +304,14 @@ export default function App() {
   };
 
   // ====== [ISSUE 2, FIXED, see below] ======
-  // [FIXED] Harden claimVisit: only allow after valid scan (use window.__VALID_SCAN__)
-  const claimVisit = async () => {
+  // Updated per prompt: claimVisit takes isValidScan = false by default. If false, blocks with alert.
+  const claimVisit = async (isValidScan = false) => {
     if (!user) return;
 
-    // 🔒 EXTRA PROTECTION
-    if (!window.__VALID_SCAN__) {
+    if (!isValidScan) {
       alert("Unauthorized action blocked ❌");
       return;
     }
-
-    window.__VALID_SCAN__ = false;
 
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
@@ -488,27 +485,32 @@ export default function App() {
             await html5QrInst.stop();
             html5QrcodeScannerRef.current = null;
 
+            // === REWRITTEN QR CALLBACK LOGIC: Only allow "VISIT_CAFFETO_123" strict ===
             const VALID_QR = "VISIT_CAFFETO_123";
-
-            const cleanedText = decodedText?.trim();
-
-            console.log("RAW SCAN:", decodedText);
-            console.log("CLEANED:", cleanedText);
-
-            // 🚨 STRICT CHECK
-            if (!cleanedText || cleanedText !== VALID_QR) {
+            const cleanedText = typeof decodedText === 'string' ? decodedText.trim() : '';
+            if (cleanedText !== VALID_QR) {
               alert("Invalid QR Code ❌");
-
               setScannerLoading(false);
               scannerMountedRef.current = false;
               setActiveTab('home');
-              return; // ⛔ STOP EXECUTION
+              return;
             }
 
-            // ✅ ONLY HERE we allow points
-            window.__VALID_SCAN__ = true;
-            await claimVisit();
+            // ======= SUCCESS SOUND AND VIBRATION (added by prompt) =======
+            try {
+              // You can use any short success sound, here is a light web-compatible beep
+              const audio = new Audio(
+                "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YYQAAABfAAD/AAD//wAA/wAA//8AAP8AAP//AAD//wAA//8AAP//AAD//wAA//8AAAAA"
+              );
+              audio.play().catch(() => {}); // Ignore autoplay restrictions (browser will often allow after user gesture)
 
+              if (navigator.vibrate) {
+                navigator.vibrate(200);
+              }
+            } catch {}
+            // ======= /SUCCESS SOUND AND VIBRATION =======
+
+            await claimVisit(true);
             setScannerLoading(false);
             scannerMountedRef.current = false;
             setActiveTab('home');
@@ -913,13 +915,7 @@ export default function App() {
             <p className="text-stone-400 text-sm mt-4 mb-2">
               Scan the QR at the cafe counter to collect your points!
             </p>
-            <button
-              onClick={() => alert("Please scan QR at the cafe to earn points")}
-              className="bg-emerald-600 mt-2 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
-              style={{ minWidth: 210, marginTop: 10 }}
-            >
-              Claim Visit Points (+10)
-            </button>
+            {/* Claim Visit Points (+10) button removed as per prompt */}
           </motion.div>
         )}
 
