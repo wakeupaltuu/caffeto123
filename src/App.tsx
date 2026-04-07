@@ -500,21 +500,27 @@ export default function App() {
         await html5QrInst.start(
             { facingMode: "environment" },
             config,
-            async (decodedText: string) => {
-              // Don't allow duplicate scan
-              if (stopped) return;
-              stopped = true;
-              setScannerLoading(true);
-              await html5QrInst.stop();
-              html5QrcodeScannerRef.current = null;
-              // Mark complete
-              // You can optionally check for a QR "secret"
-              // e.g. decodedText === expected string
-              await claimVisit();
-              setScannerLoading(false);
-              scannerMountedRef.current = false;
-              setActiveTab('home');
-            },
+           async (decodedText: string) => {
+  // Don't allow duplicate scan
+  if (stopped) return;
+  stopped = true;
+
+  setScannerLoading(true);
+
+  await html5QrInst.stop();
+  html5QrcodeScannerRef.current = null;
+
+  // ✅ QR VALIDATION (IMPORTANT)
+  if (decodedText === "VISIT_CAFFETO_123") {
+    await claimVisit();
+  } else {
+    alert("Invalid QR Code ❌");
+  }
+
+  setScannerLoading(false);
+  scannerMountedRef.current = false;
+  setActiveTab('home');
+},
             (error: any) => {
               // Optionally show scan errors here
             }
