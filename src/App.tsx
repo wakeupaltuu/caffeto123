@@ -303,10 +303,18 @@ export default function App() {
     }
   };
 
-  // ====== [ISSUE 2] REMOVE 24-HR RESTRICTION; TEST MODE; CAFE REBRAND ======
-  // [CHANGED] Replace claimVisit with test-mode cafe version
+  // ====== [ISSUE 2, FIXED, see below] ======
+  // [FIXED] Harden claimVisit: only allow after valid scan (use window.__VALID_SCAN__)
   const claimVisit = async () => {
     if (!user) return;
+
+    // 🔒 EXTRA PROTECTION
+    if (!window.__VALID_SCAN__) {
+      alert("Unauthorized action blocked ❌");
+      return;
+    }
+
+    window.__VALID_SCAN__ = false;
 
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
@@ -470,7 +478,7 @@ export default function App() {
         await html5QrInst.start(
           { facingMode: "environment" },
           config,
-          // [CHANGED IMPLEMENTATION BELOW]
+          // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
             if (stopped) return;
             stopped = true;
@@ -482,11 +490,24 @@ export default function App() {
 
             const VALID_QR = "VISIT_CAFFETO_123";
 
-            if (decodedText.trim() === VALID_QR) {
-              await claimVisit();
-            } else {
+            const cleanedText = decodedText?.trim();
+
+            console.log("RAW SCAN:", decodedText);
+            console.log("CLEANED:", cleanedText);
+
+            // 🚨 STRICT CHECK
+            if (!cleanedText || cleanedText !== VALID_QR) {
               alert("Invalid QR Code ❌");
+
+              setScannerLoading(false);
+              scannerMountedRef.current = false;
+              setActiveTab('home');
+              return; // ⛔ STOP EXECUTION
             }
+
+            // ✅ ONLY HERE we allow points
+            window.__VALID_SCAN__ = true;
+            await claimVisit();
 
             setScannerLoading(false);
             scannerMountedRef.current = false;
@@ -893,7 +914,7 @@ export default function App() {
               Scan the QR at the cafe counter to collect your points!
             </p>
             <button
-              onClick={claimVisit}
+              onClick={() => alert("Please scan QR at the cafe to earn points")}
               className="bg-emerald-600 mt-2 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
               style={{ minWidth: 210, marginTop: 10 }}
             >
