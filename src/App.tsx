@@ -74,7 +74,6 @@ export default function App() {
   }, []);
   // ============================================
 
-  // [ISSUE 2] Scanner
   const html5QrcodeScannerRef = useRef<any>(null);
   const scannerMountedRef = useRef(false);
 
@@ -181,12 +180,10 @@ export default function App() {
     }
   };
 
-  // [ISSUE 1,6,8] Google Review and state/Firestore
   const openReview = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
 
-    // Immediately update local state for UX (ISSUE 6)
     setUserData((prev: any) => ({
       ...prev,
       reviewClickedAt: new Date().toISOString(),
@@ -197,15 +194,10 @@ export default function App() {
       await updateDoc(userRef, {
         reviewClickedAt: new Date().toISOString()
       });
-    } catch (err) {
-      // Firestore error is non-blocking to user (since review redirect always opens anyway)
-      // Optionally show error here if required.
-    }
-    // [ISSUE 1] Use constant, and proper window.open target/rel
+    } catch (err) {}
     window.open(GOOGLE_REVIEW_URL, "_blank", "noopener,noreferrer");
   };
 
-  // [ISSUE 1,6,8] claimReviewPoints with error handling
   const claimReviewPoints = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
@@ -217,12 +209,9 @@ export default function App() {
       if (userSnap.exists()) {
         const data = userSnap.data();
         const clickedAt = data.reviewClickedAt ? new Date(data.reviewClickedAt) : null;
-
         if (!clickedAt) return;
         const diffMinutes = (now.getTime() - clickedAt.getTime()) / (1000 * 60);
-
         if (diffMinutes >= 2) {
-          // Add 20 to this user's points for this business
           await setDoc(
             statsRef,
             {
@@ -232,7 +221,6 @@ export default function App() {
             },
             { merge: true }
           );
-          // Mark review complete
           await updateDoc(userRef, {
             reviewClickedAt: null,
             reviewCompleted: true
@@ -251,6 +239,7 @@ export default function App() {
   };
 
   // [ISSUE 5]: Claim Daily Reward using lastDailyClaimAt only!
+  // (unchanged; you requested only changes for claimVisit, not daily reward)
   const claimDailyReward = async () => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
@@ -314,15 +303,16 @@ export default function App() {
     }
   };
 
+  // ====== [ISSUE 2] REMOVE 24-HR RESTRICTION; TEST MODE; CAFE REBRAND ======
+  // [CHANGED] Replace claimVisit with test-mode cafe version
   const claimVisit = async () => {
     if (!user) return;
-  
+
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
-  
-    // 🚀 Use current state (no Firestore read needed for testing)
+
     const priorPoints = stats?.totalPoints ?? 0;
-  
+
     try {
       await setDoc(
         statsRef,
@@ -334,28 +324,44 @@ export default function App() {
         },
         { merge: true }
       );
-  
+
       setStats((prev: any) => ({
         ...prev,
         totalPoints: priorPoints + 10,
         lastVisitAt: new Date().toISOString()
       }));
-  
-      alert("🎉 +10 points for visiting!");
+
+      alert("☕ +10 points for visiting the cafe!");
     } catch (err) {
       alert("Error awarding visit points.");
     }
   };
+  // ======================================================================
 
   // ----------- Premium Loyalty Card Calculations ------------
   const userPoints = stats?.totalPoints ?? 0;
   const userName = userData?.name || 'User';
 
-  // Next reward (find first reward user doesn't yet have, fallback to 'next reward' setup)
+  // [ISSUE 4/5/6] Cafe Rewards + Images
   const rewards = [
-    { id: 1, title: 'Free Blowout', points: 300, image: 'https://images.unsplash.com/photo-1562322140-8baeececf3df?q=80&w=500&auto=format&fit=crop' },
-    { id: 2, title: 'Signature Facial', points: 500, image: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?q=80&w=500&auto=format&fit=crop' },
-    { id: 3, title: 'Full Balayage', points: 1000, image: 'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?q=80&w=500&auto=format&fit=crop' },
+    {
+      id: 1,
+      title: 'Free Coffee',
+      points: 100,
+      image: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93',
+    },
+    {
+      id: 2,
+      title: 'Free Croissant',
+      points: 200,
+      image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a',
+    },
+    {
+      id: 3,
+      title: 'Free Combo Meal',
+      points: 400,
+      image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5',
+    },
   ];
 
   const nextReward =
@@ -370,14 +376,14 @@ export default function App() {
   const stampCount = LOYALTY_REWARD.stampCount;
   const stampsFilled = Math.floor(progress * stampCount);
 
+  // [ISSUE 3] EARNING OPTIONS – REBRAND, LABELS
   const earnOptions = [
     { id: 'refer', title: 'Refer a Friend', points: 50, icon: Users, color: 'bg-rose-100 text-rose-700' },
     { id: 'login', title: 'Daily Login', points: 5, icon: CalendarCheck, color: 'bg-amber-100 text-amber-700' },
     { id: 'review', title: 'Leave a Review', points: 20, icon: MessageSquareHeart, color: 'bg-stone-200 text-stone-700' },
-    { id: 'visit', title: 'Visit Clinic', points: 'Scan QR', icon: ScanLine, color: 'bg-emerald-100 text-emerald-700' },
+    { id: 'visit', title: 'Visit Cafe', points: 'Scan QR', icon: ScanLine, color: 'bg-emerald-100 text-emerald-700' },
   ];
 
-  // [ISSUE 4] – share/refer with native and fallback
   const handleShare = async () => {
     try {
       if (navigator.share) {
@@ -395,23 +401,19 @@ export default function App() {
     }
   };
 
-  // [ISSUE 7] Centralized handler for ALL earn cards
   const handleEarnClick = async (id: string, extra?: { isReview: boolean; clickedAt?: Date | null; isClaimable?: boolean; reviewCompleted?: boolean }) => {
     if (!user) return;
     switch (id) {
       case 'review': {
-        // Only allow if not complete
         if (extra?.reviewCompleted) return;
         if (!extra?.clickedAt) {
           await openReview();
         } else if (extra?.isClaimable) {
           await claimReviewPoints();
         }
-        // else do nothing, must wait
         break;
       }
       case 'visit': {
-        // [ISSUE 3]: Navigate to scan tab
         setActiveTab('scan');
         break;
       }
@@ -423,14 +425,14 @@ export default function App() {
         await claimDailyReward();
         break;
       }
-      default: break;
+      default:
+        break;
     }
   };
 
-  // [ISSUE 2] Scanner effect (mount/unmount) and scan handler
+  // [ISSUE 1] Secure QR SCAN HANDLER (Accept ONLY valid code)
   useEffect(() => {
     const runScanner = async () => {
-      // Only on Scan tab
       if (activeTab !== 'scan') {
         if (scannerMountedRef.current && html5QrcodeScannerRef.current) {
           try {
@@ -441,11 +443,8 @@ export default function App() {
         scannerMountedRef.current = false;
         return;
       }
-
       setScannerLoading(true);
       setScannerError(null);
-
-      // Dynamically import html5-qrcode ONLY if needed (fixes SSR/react warning)
       let Html5Qrcode;
       try {
         // @ts-ignore
@@ -455,10 +454,8 @@ export default function App() {
         setScannerLoading(false);
         return;
       }
-      if (scannerMountedRef.current) return; // avoid double-mount
+      if (scannerMountedRef.current) return;
       scannerMountedRef.current = true;
-
-      // Ensure DOM exists
       const readerElem = document.getElementById('reader');
       if (!readerElem) {
         setScannerError("Scanner DOM not ready");
@@ -468,37 +465,36 @@ export default function App() {
       const html5QrInst = new Html5Qrcode("reader");
       html5QrcodeScannerRef.current = html5QrInst;
       let stopped = false;
-
       try {
-        // https://github.com/mebjas/html5-qrcode#start-camera-using-permissions
         const config = { fps: 10, qrbox: { width: 200, height: 200 } };
         await html5QrInst.start(
-            { facingMode: "environment" },
-            config,
-           async (decodedText: string) => {
-  // Don't allow duplicate scan
-  if (stopped) return;
-  stopped = true;
+          { facingMode: "environment" },
+          config,
+          // [CHANGED IMPLEMENTATION BELOW]
+          async (decodedText: string) => {
+            if (stopped) return;
+            stopped = true;
 
-  setScannerLoading(true);
+            setScannerLoading(true);
 
-  await html5QrInst.stop();
-  html5QrcodeScannerRef.current = null;
+            await html5QrInst.stop();
+            html5QrcodeScannerRef.current = null;
 
-  // ✅ QR VALIDATION (IMPORTANT)
-  if (decodedText === "VISIT_CAFFETO_123") {
-    await claimVisit();
-  } else {
-    alert("Invalid QR Code ❌");
-  }
+            const VALID_QR = "VISIT_CAFFETO_123";
 
-  setScannerLoading(false);
-  scannerMountedRef.current = false;
-  setActiveTab('home');
-},
-            (error: any) => {
-              // Optionally show scan errors here
+            if (decodedText.trim() === VALID_QR) {
+              await claimVisit();
+            } else {
+              alert("Invalid QR Code ❌");
             }
+
+            setScannerLoading(false);
+            scannerMountedRef.current = false;
+            setActiveTab('home');
+          },
+          (error: any) => {
+            // Optionally show scan errors here
+          }
         );
         setScannerLoading(false);
       } catch (err: any) {
@@ -518,9 +514,8 @@ export default function App() {
     };
 
     runScanner();
-    // Cleanup when switching away from Scan tab
     // eslint-disable-next-line
-  }, [activeTab, user]); // re-run for user (so if sign in/out, scanner resets)
+  }, [activeTab, user]);
 
   if (!isAuthReady) {
     return <div className="min-h-screen bg-stone-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-rose-200 border-t-rose-600 rounded-full animate-spin"></div></div>;
@@ -627,7 +622,8 @@ export default function App() {
                 </div>
                 <div className="w-10 h-10 rounded-full overflow-hidden border border-rose-100 bg-stone-100">
                   <img
-                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop"
+                    // [ISSUE 5] cafe/cafe interior user profile/fallback
+                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24"
                     alt="Profile"
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
@@ -790,17 +786,14 @@ export default function App() {
                     const isRefer = option.id === 'refer';
                     const isLogin = option.id === 'login';
 
-                    // Review-specific derived state from Firestore
                     const clickedAt = isReview && userData?.reviewClickedAt
                       ? new Date(userData.reviewClickedAt)
                       : null;
                     const reviewCompleted = isReview ? Boolean(userData?.reviewCompleted) : false;
 
-                    // Remove "const now = ..." local declarations; use 'now' from global timer state!
                     const diffMinutes = clickedAt ? (now.getTime() - clickedAt.getTime()) / (1000 * 60) : null;
                     const isClaimable = isReview && Boolean(clickedAt && diffMinutes !== null && diffMinutes >= 2 && !reviewCompleted);
 
-                    // Dynamic text
                     const titleText = isReview
                       ? reviewCompleted
                         ? 'Completed'
@@ -821,7 +814,6 @@ export default function App() {
                             : '+20 points'
                       : (typeof option.points === 'number' ? `+${option.points} points` : option.points);
 
-                    // Styles
                     const cardClassNames = [
                       'bg-white p-4 rounded-2xl cursor-pointer border',
                       isReview
@@ -833,7 +825,6 @@ export default function App() {
                         : 'border-stone-100'
                     ].join(' ');
 
-                    // [ISSUE 7] Attach click logic to each card via central handler
                     const handleClick = () =>
                       handleEarnClick(option.id, {
                         isReview,
@@ -881,7 +872,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* SCAN TAB – [ISSUE 2] */}
+        {/* SCAN TAB – Cafe */}
         {activeTab === 'scan' && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -899,9 +890,8 @@ export default function App() {
             {scannerLoading && <div className="text-stone-500 mt-3">Loading camera...</div>}
             {scannerError && <div className="text-red-500 mt-3">{scannerError}</div>}
             <p className="text-stone-400 text-sm mt-4 mb-2">
-              Scan the code at clinic to collect your points!
+              Scan the QR at the cafe counter to collect your points!
             </p>
-            {/* Optionally provide manual fallback */}
             <button
               onClick={claimVisit}
               className="bg-emerald-600 mt-2 text-white text-base font-medium px-8 py-3 rounded-xl shadow-md hover:bg-emerald-700 active:bg-emerald-700 transition-all"
@@ -974,7 +964,8 @@ export default function App() {
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-100">
                   <img
-                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop"
+                    // [ISSUE 5] cafe/cafe interior user profile/fallback (profile tab)
+                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24"
                     alt="Profile"
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
