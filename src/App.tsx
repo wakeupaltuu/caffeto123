@@ -47,6 +47,13 @@ const LOYALTY_REWARD = {
   memberLevel: 'Rose Gold'
 };
 
+// ---- Success Sound for iPhone fix ----
+const playSuccessSound = () => {
+  const audio = new Audio("https://notificationsounds.com/storage/sounds/file-sounds-1150-pristine.mp3");
+  audio.volume = 1;
+  audio.play().catch(() => {});
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -496,14 +503,9 @@ export default function App() {
               return;
             }
 
-            // ======= SUCCESS SOUND AND VIBRATION (added by prompt) =======
+            // ======= SUCCESS SOUND AND VIBRATION (iPhone Safari fix) =======
             try {
-              // You can use any short success sound, here is a light web-compatible beep
-              const audio = new Audio(
-                "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YYQAAABfAAD/AAD//wAA/wAA//8AAP8AAP//AAD//wAA//8AAP//AAD//wAA//8AAAAA"
-              );
-              audio.play().catch(() => {}); // Ignore autoplay restrictions (browser will often allow after user gesture)
-
+              playSuccessSound();
               if (navigator.vibrate) {
                 navigator.vibrate(200);
               }
