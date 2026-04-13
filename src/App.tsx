@@ -92,6 +92,9 @@ export default function App() {
   // STEP 1: ADD STATE (top with other useState)
   const [activeRedemption, setActiveRedemption] = useState<any>(null);
 
+  // === NEW STATE for user's active pending reward ===
+  const [existingRedemption, setExistingRedemption] = useState<any>(null);
+
   // STEP 4.1: ADD TIMER STATE
   const [timeLeft, setTimeLeft] = useState(60);
 
@@ -220,6 +223,32 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [activeRedemption]);
+
+  // STEP 2: Fetch active redemption for user
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, "redemptions"),
+      where("userId", "==", user.uid),
+      where("businessId", "==", BIZ_ID),
+      where("status", "==", "pending")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const docData = snapshot.docs[0];
+        setExistingRedemption({
+          id: docData.id,
+          ...docData.data()
+        });
+      } else {
+        setExistingRedemption(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1072,6 +1101,26 @@ export default function App() {
             className="p-6 pt-16"
           >
             <h1 className="text-2xl font-serif font-medium text-stone-900 mb-6">All Rewards</h1>
+            {/* Active reward notification shown at top of rewards tab */}
+            {existingRedemption && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
+                <h2 className="text-sm font-semibold text-emerald-700 mb-1">
+                  Active Reward
+                </h2>
+                <p className="text-lg font-bold tracking-widest">
+                  {existingRedemption.redemptionCode}
+                </p>
+                <p className="text-xs text-stone-500 mt-1">
+                  Show this code to staff
+                </p>
+                <button
+                  onClick={() => setActiveRedemption(existingRedemption)}
+                  className="mt-3 w-full py-2 bg-emerald-600 text-white rounded-lg text-sm"
+                >
+                  Open Reward
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               {rewards.map((reward, index) => {
                 const isUnlocked = userPoints >= reward.points;
