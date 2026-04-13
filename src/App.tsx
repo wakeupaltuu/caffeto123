@@ -29,6 +29,7 @@ import {
   updateDoc,
   getDoc
 } from 'firebase/firestore';
+import { addDoc, collection } from "firebase/firestore"; // <--- STEP 1: ADD THESE
 
 // 🟡 [ISSUE 8] Extract constants:
 const GOOGLE_REVIEW_URL = "https://g.page/r/YOUR_GOOGLE_REVIEW_LINK/review"; // Replace with actual business Google review link
@@ -83,6 +84,55 @@ export default function App() {
 
   const html5QrcodeScannerRef = useRef<any>(null);
   const scannerMountedRef = useRef(false);
+
+  // STEP 1: ADD STATE (top with other useState)
+  const [activeRedemption, setActiveRedemption] = useState<any>(null);
+
+  // STEP 4.1: ADD TIMER STATE
+  const [timeLeft, setTimeLeft] = useState(60);
+
+  // STEP 5: ADD handleCompleteRedemption function
+  const handleCompleteRedemption = async () => {
+    if (!activeRedemption || !user || !stats) return;
+    try {
+      // 1. Check if already expired
+      if (timeLeft <= 0) {
+        alert("Code expired");
+        return;
+      }
+
+      // 2. Update redemption status
+      await updateDoc(doc(db, "redemptions", activeRedemption.id), {
+        status: "completed"
+      });
+
+      // 3. Deduct points
+      const statsId = `${user.uid}_${BIZ_ID}`;
+      const statsRef = doc(db, "userBusinessStats", statsId);
+      const newPoints = Math.max(
+        0,
+        (stats.totalPoints ?? 0) - activeRedemption.pointsUsed
+      );
+      await updateDoc(statsRef, {
+        totalPoints: newPoints
+      });
+
+      // 4. Update local state instantly
+      setStats((prev: any) => ({
+        ...prev,
+        totalPoints: newPoints
+      }));
+
+      // 5. Close modal
+      setActiveRedemption(null);
+
+      // 6. Success feedback
+      alert("Reward Redeemed 🎉");
+    } catch (error) {
+      console.error("Completion error:", error);
+      alert("Something went wrong");
+    }
+  };
 
   // [ISSUE 8] Avoid duplicate Firestore calls
   useEffect(() => {
@@ -139,6 +189,33 @@ export default function App() {
       setStats(null);
     }
   }, [user, isAuthReady]);
+
+  // STEP 4.2: ADD useEffect FOR TIMER
+  useEffect(() => {
+    if (!activeRedemption) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const expiry = new Date(activeRedemption.expiresAt).getTime();
+      const secondsLeft = Math.max(0, Math.floor((expiry - now) / 1000));
+
+      setTimeLeft(secondsLeft);
+
+      if (secondsLeft <= 0) {
+        clearInterval(interval);
+
+        // mark expired in Firestore
+        updateDoc(doc(db, "redemptions", activeRedemption.id), {
+          status: "expired"
+        }).catch(() => {});
+
+        alert("Code expired ⏱️");
+        setActiveRedemption(null);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeRedemption]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,6 +452,47 @@ export default function App() {
       image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5',
     },
   ];
+
+  // STEP 2: Update handleRedeem to async & Firestore redemption w/ modal state
+  const handleRedeem = async (reward: any) => {
+    if (!user || !stats) return;
+
+    if ((stats.totalPoints ?? 0) < reward.points) {
+      alert("Not enough points");
+      return;
+    }
+
+    try {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      const redemptionData = {
+        userId: user.uid,
+        businessId: BIZ_ID,
+        rewardId: reward.id,
+        rewardName: reward.title,
+        pointsUsed: reward.points,
+        status: "pending",
+        redemptionCode: code,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60000).toISOString()
+      };
+
+      const docRef = await addDoc(collection(db, "redemptions"), redemptionData);
+
+      setActiveRedemption({
+        id: docRef.id,
+        ...redemptionData
+      });
+
+      // STEP 4.4: RESET TIMER ON NEW REDEMPTION
+      setTimeLeft(60);
+
+      console.log("Redemption created:", redemptionData);
+    } catch (error) {
+      console.error("Redemption error:", error);
+      alert("Something went wrong");
+    }
+  };
 
   const nextReward =
     rewards.find(r => r.points > userPoints) ||
@@ -784,6 +902,7 @@ export default function App() {
                                 ? 'bg-stone-900 text-white hover:bg-stone-800 shadow'
                                 : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`
                             }
+                            onClick={() => handleRedeem(reward)}
                           >
                             {isUnlocked ? 'Redeem' : 'Locked'}
                           </button>
@@ -961,6 +1080,7 @@ export default function App() {
                             ? 'bg-stone-900 text-white hover:bg-stone-800'
                             : 'bg-stone-200 text-stone-400 cursor-not-allowed'
                         }`}
+                        onClick={() => handleRedeem(reward)}
                       >
                         {isUnlocked ? 'Redeem' : 'Locked'}
                       </button>
@@ -1036,6 +1156,50 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        {/* STEP 3: Redemption Modal */}
+        {activeRedemption && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center">
+            <div className="bg-white rounded-2xl p-6 w-[90%] max-w-sm text-center">
+              <h2 className="text-xl font-semibold mb-2">
+                {activeRedemption.rewardName}
+              </h2>
+
+              <p className="text-sm text-stone-500 mb-4">
+                Show this code to staff
+              </p>
+
+              <div className="text-4xl font-bold tracking-widest mb-6">
+                {activeRedemption.redemptionCode}
+              </div>
+
+              {/* STEP 4.3: SHOW TIMER BELOW CODE */}
+              <p className="text-sm text-red-500 mt-2">
+                Expires in {timeLeft}s
+              </p>
+
+              {/* STEP 5: Mark as Used button */}
+              <button
+                onClick={handleCompleteRedemption}
+                disabled={timeLeft <= 0}
+                className={`w-full py-2 rounded-lg mt-3 ${
+                  timeLeft <= 0
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-green-600 text-white"
+                }`}
+              >
+                Mark as Used
+              </button>
+
+              <button
+                onClick={() => setActiveRedemption(null)}
+                className="w-full py-2 bg-stone-900 text-white rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
