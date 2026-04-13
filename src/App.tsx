@@ -96,7 +96,7 @@ export default function App() {
   const [existingRedemption, setExistingRedemption] = useState<any>(null);
 
   // STEP 4.1: ADD TIMER STATE
-  const [timeLeft, setTimeLeft] = useState(60);
+  const [timeLeft, setTimeLeft] = useState(15 * 60);
 
   // STEP 5: ADD handleCompleteRedemption function
   const handleCompleteRedemption = async () => {
@@ -528,7 +528,7 @@ export default function App() {
         status: "pending",
         redemptionCode: code,
         createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 60000).toISOString()
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
       };
 
       const docRef = await addDoc(collection(db, "redemptions"), redemptionData);
@@ -539,7 +539,7 @@ export default function App() {
       });
 
       // STEP 4.4: RESET TIMER ON NEW REDEMPTION
-      setTimeLeft(60);
+      setTimeLeft(15 * 60);
 
       console.log("Redemption created:", redemptionData);
     } catch (error) {
