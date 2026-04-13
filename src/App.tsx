@@ -27,9 +27,13 @@ import {
   setDoc,
   onSnapshot,
   updateDoc,
-  getDoc
-} from 'firebase/firestore';
-import { addDoc, collection } from "firebase/firestore"; // <--- STEP 1: ADD THESE
+  getDoc,
+  query,
+  where,
+  getDocs,
+  collection
+} from "firebase/firestore";
+import { addDoc } from "firebase/firestore"; // Already included above in full collection import
 
 // 🟡 [ISSUE 8] Extract constants:
 const GOOGLE_REVIEW_URL = "https://g.page/r/YOUR_GOOGLE_REVIEW_LINK/review"; // Replace with actual business Google review link
@@ -462,7 +466,28 @@ export default function App() {
       return;
     }
 
+    // 🔴 Check if user already has active redemption
     try {
+      const q = query(
+        collection(db, "redemptions"),
+        where("userId", "==", user.uid),
+        where("businessId", "==", BIZ_ID),
+        where("status", "==", "pending")
+      );
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        alert("You already have an active reward. Please use it first.");
+        return;
+      }
+
+      // Optional: ask for confirmation before creating
+      const confirmRedeem = window.confirm(
+        `Redeem ${reward.title} for ${reward.points} points?`
+      );
+
+      if (!confirmRedeem) return;
+
       const code = Math.floor(100000 + Math.random() * 900000).toString();
 
       const redemptionData = {
