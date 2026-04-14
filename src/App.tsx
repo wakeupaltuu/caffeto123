@@ -444,37 +444,19 @@ export default function App() {
 
     try {
       // First, try to get the existing document
-      const docSnap = await getDoc(statsRef);
-
       const nowIso = new Date().toISOString();
 
-      if (docSnap.exists()) {
-        // Document exists, increment points and visitsCount, set lastVisitAt
-        await setDoc(
-          statsRef,
-          {
-            userId: user.uid,
-            bizId: BIZ_ID,
-            totalPoints: increment(10),
-            lastVisitAt: nowIso,
-            visitsCount: increment(1)
-          },
-          { merge: true }
-        );
-      } else {
-        // Document does not exist - create with initial stats
-        await setDoc(
-          statsRef,
-          {
-            userId: user.uid,
-            bizId: BIZ_ID,
-            totalPoints: 10,
-            lastVisitAt: nowIso,
-            visitsCount: 1
-          },
-          { merge: true }
-        );
-      }
+      await setDoc(
+        statsRef,
+        {
+          userId: user.uid,
+          bizId: BIZ_ID,
+          totalPoints: increment(10),
+          lastVisitAt: nowIso,
+          visitsCount: increment(1)
+        },
+        { merge: true }
+      );
 
       // Update local stats state to reflect changes immediately (optimistic update)
       setStats((prev: any) => ({
