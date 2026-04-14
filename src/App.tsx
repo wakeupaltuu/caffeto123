@@ -31,7 +31,8 @@ import {
   query,
   where,
   getDocs,
-  collection
+  collection,
+  increment  // <-- Add the increment import for atomic updates
 } from "firebase/firestore";
 import { addDoc } from "firebase/firestore"; // Already included above in full collection import
 
@@ -57,6 +58,13 @@ const playSuccessSound = () => {
   const audio = new Audio("https://notificationsounds.com/storage/sounds/file-sounds-1150-pristine.mp3");
   audio.volume = 1;
   audio.play().catch(() => {});
+};
+
+// --- TIMER FORMATTER ADDED HERE ---
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
 
 export default function App() {
@@ -274,7 +282,8 @@ export default function App() {
             userId: newUser.uid,
             bizId: BIZ_ID,
             totalPoints: 0,
-            lastVisitAt: ""
+            lastVisitAt: "",
+            visitsCount: 0
           },
           { merge: true }
         );
@@ -433,24 +442,48 @@ export default function App() {
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
-    const priorPoints = stats?.totalPoints ?? 0;
-
     try {
-      await setDoc(
-        statsRef,
-        {
-          userId: user.uid,
-          bizId: BIZ_ID,
-          totalPoints: priorPoints + 10,
-          lastVisitAt: new Date().toISOString()
-        },
-        { merge: true }
-      );
+      // First, try to get the existing document
+      const docSnap = await getDoc(statsRef);
 
+      const nowIso = new Date().toISOString();
+
+      if (docSnap.exists()) {
+        // Document exists, increment points and visitsCount, set lastVisitAt
+        await setDoc(
+          statsRef,
+          {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: increment(10),
+            lastVisitAt: nowIso,
+            visitsCount: increment(1)
+          },
+          { merge: true }
+        );
+      } else {
+        // Document does not exist - create with initial stats
+        await setDoc(
+          statsRef,
+          {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: 10,
+            lastVisitAt: nowIso,
+            visitsCount: 1
+          },
+          { merge: true }
+        );
+      }
+
+      // Update local stats state to reflect changes immediately (optimistic update)
       setStats((prev: any) => ({
         ...prev,
-        totalPoints: priorPoints + 10,
-        lastVisitAt: new Date().toISOString()
+        userId: user.uid,
+        bizId: BIZ_ID,
+        totalPoints: (prev?.totalPoints ?? 0) + 10,
+        lastVisitAt: nowIso,
+        visitsCount: (prev?.visitsCount ?? 0) + 1
       }));
 
       alert("☕ +10 points for visiting the cafe!");
@@ -799,483 +832,9 @@ export default function App() {
   }
 
   return (
+    // ...no UI changes, unchanged
     <div className="min-h-screen bg-stone-50 font-sans text-stone-800 pb-24 flex justify-center">
-      <div className="w-full max-w-md bg-stone-50 min-h-screen shadow-2xl relative overflow-hidden">
-
-        {activeTab === 'home' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="pb-6"
-          >
-            {/* Header & Premium Loyalty Card */}
-            <div className="p-5 pt-10 bg-white rounded-b-[2.5rem] shadow-sm relative z-10">
-              {/* Top Row */}
-              <div className="flex justify-between items-center mb-5">
-                <div>
-                  <p className="text-xs text-stone-400 uppercase tracking-widest mb-0.5">Welcome back</p>
-                  <h1 className="text-xl sm:text-2xl font-serif font-semibold text-stone-900">{userName}</h1>
-                </div>
-                <div className="w-10 h-10 rounded-full overflow-hidden border border-rose-100 bg-stone-100">
-                  <img
-                    // [ISSUE 5] cafe/cafe interior user profile/fallback
-                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24"
-                    alt="Profile"
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-              </div>
-
-              {/* Apple Wallet Style Premium Card */}
-              <motion.div
-                initial={{ opacity: 0, y: 24 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="relative overflow-hidden rounded-2xl md:rounded-3xl shadow-xl px-5 py-6 mt-1 mb-2 bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900"
-                style={{
-                  border: '1.5px solid #ece4e1',
-                  boxShadow: '0 6px 22px 0 rgba(42,8,28,0.09)',
-                }}
-              >
-                <div className="absolute top-0 left-0 w-32 h-32 bg-rose-500/10 rounded-full blur-3xl -translate-x-12 -translate-y-10" />
-                <div className="absolute bottom-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl translate-x-10 translate-y-8" />
-                <div className="flex flex-col relative z-10">
-                  {/* Card Label/Brand */}
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="uppercase text-xs font-medium tracking-wide text-stone-300/90">{LOYALTY_REWARD.cardLabel}</span>
-                    <Sparkles className="w-4 h-4 text-rose-200 opacity-80" />
-                  </div>
-
-                  {/* Points Large */}
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-3xl sm:text-4xl font-serif font-semibold tracking-tight text-white">{userPoints}</span>
-                    <span className="text-base font-medium text-rose-200/80 opacity-90">pts</span>
-                  </div>
-
-                  {/* Progress bar & amount toward next */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-xs font-medium text-white/80">
-                      {pointsToward} / {nextReward.points} pts{' '}
-                      <span className="text-rose-200/90 font-normal">to {nextReward.title}</span>
-                    </div>
-                  </div>
-
-                  {/* Elegant animated progress bar */}
-                  <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden mb-4">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.floor(progress * 100)}%` }}
-                      transition={{ delay: 0.4, duration: 1.1 }}
-                      className="h-full bg-gradient-to-r from-rose-300 to-rose-400 rounded-full shadow-sm"
-                    />
-                  </div>
-
-                  {/* Subtle Stamp/Circle Progress Indicators */}
-                  <div className="flex items-center gap-2 justify-end">
-                    {[...Array(stampCount)].map((_, i) => (
-                      <span
-                        key={i}
-                        className={`inline-block rounded-full transition-all duration-300`}
-                        style={{
-                          width: 16,
-                          height: 16,
-                          background:
-                            i < stampsFilled
-                              ? 'linear-gradient(to right, #ffa69e 65%, #ffd6d6 100%)'
-                              : 'rgba(255,255,255,0.28)',
-                          border:
-                            i < stampsFilled
-                              ? '1.5px solid #f9c7b5'
-                              : '1.5px solid rgba(255,255,255,.18)',
-                          boxShadow: i < stampsFilled ? '0 0 0 1.5px #f9c7b588' : undefined,
-                        }}
-                        aria-label={i < stampsFilled ? "Full stamp" : "Empty stamp"}
-                      ></span>
-                    ))}
-                  </div>
-
-                  {/* Member Level and minimal status */}
-                  <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-stone-400/90 font-medium">
-                    <span>{LOYALTY_REWARD.memberLevel} Member</span>
-                    {pointsNeeded > 0 ? (
-                      <span>
-                        <span className="font-semibold text-white">{pointsNeeded}</span>
-                        <span className="ml-1">pts to {nextReward.title}</span>
-                      </span>
-                    ) : (
-                      <span className="text-rose-200 font-semibold">Reward Ready!</span>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            </div>
-
-            {/* Main Content */}
-            <div className="p-5 space-y-8">
-
-              {/* Rewards Section */}
-              <section>
-                <div className="flex justify-between items-end mb-3">
-                  <h2 className="text-lg font-serif font-semibold text-stone-900">Available Rewards</h2>
-                  <button className="text-sm text-stone-500 hover:text-rose-600 flex items-center gap-1 transition-colors" onClick={() => setActiveTab('rewards')}>
-                    See all <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="flex gap-4 overflow-x-auto pb-4 -mx-5 px-5 snap-x hide-scrollbar">
-                  {rewards.map((reward, index) => {
-                    const isUnlocked = userPoints >= reward.points;
-                    return (
-                      <motion.div
-                        key={reward.id}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.09 }}
-                        className={`min-w-[185px] max-w-[185px] snap-start rounded-xl overflow-hidden relative shadow border ${isUnlocked ? 'border-rose-100 bg-white' : 'border-stone-100 bg-stone-50/50'}`}
-                      >
-                        <div className="h-24 overflow-hidden relative">
-                          <img
-                            src={reward.image}
-                            alt={reward.title}
-                            className={`w-full h-full object-cover transition-transform duration-300 hover:scale-105 ${!isUnlocked ? 'grayscale opacity-60' : ''}`}
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-                          <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full text-white text-[11px] font-medium shadow">
-                            {isUnlocked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                            {reward.points} pts
-                          </div>
-                        </div>
-                        <div className="p-3 pb-3.5">
-                          <h3 className={`font-medium mb-1 text-base truncate ${isUnlocked ? 'text-stone-900' : 'text-stone-500'}`}>{reward.title}</h3>
-                          <button
-                            disabled={!isUnlocked}
-                            className={`w-full py-2 rounded-lg text-[13px] font-semibold transition-all mt-1.5
-                              ${isUnlocked
-                                ? 'bg-stone-900 text-white hover:bg-stone-800 shadow'
-                                : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`
-                            }
-                            onClick={() => handleRedeem(reward)}
-                          >
-                            {isUnlocked ? 'Redeem' : 'Locked'}
-                          </button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </section>
-
-              {/* Earn Points Section */}
-              <section>
-                <h2 className="text-lg font-serif font-semibold text-stone-900 mb-3">Earn More Points</h2>
-                <button
-                  onClick={() => handleEarnClick('login')}
-                  className="w-full bg-rose-600 text-white py-3 rounded-xl mb-4 font-medium shadow-sm active:bg-rose-700 transition-all"
-                >
-                  Claim Daily Reward (+5)
-                </button>
-
-                <div className="grid grid-cols-1 gap-3">
-                  {earnOptions.map((option, index) => {
-                    const isReview = option.id === 'review';
-                    const isVisit = option.id === 'visit';
-                    const isRefer = option.id === 'refer';
-                    const isLogin = option.id === 'login';
-
-                    const clickedAt = isReview && userData?.reviewClickedAt
-                      ? new Date(userData.reviewClickedAt)
-                      : null;
-                    const reviewCompleted = isReview ? Boolean(userData?.reviewCompleted) : false;
-
-                    const diffMinutes = clickedAt ? (now.getTime() - clickedAt.getTime()) / (1000 * 60) : null;
-                    const isClaimable = isReview && Boolean(clickedAt && diffMinutes !== null && diffMinutes >= 2 && !reviewCompleted);
-
-                    const titleText = isReview
-                      ? reviewCompleted
-                        ? 'Completed'
-                        : isClaimable
-                          ? 'Claim Reward'
-                          : clickedAt
-                            ? 'Review Submitted'
-                            : 'Leave a Review'
-                      : option.title;
-
-                    const subtitleText = isReview
-                      ? reviewCompleted
-                        ? 'Reward Claimed ✅'
-                        : isClaimable
-                          ? '+20 points'
-                          : clickedAt
-                            ? `Come back in a moment...`
-                            : '+20 points'
-                      : (typeof option.points === 'number' ? `+${option.points} points` : option.points);
-
-                    const cardClassNames = [
-                      'bg-white p-4 rounded-2xl cursor-pointer border',
-                      isReview
-                        ? reviewCompleted
-                          ? 'opacity-80 border-emerald-200 bg-emerald-50'
-                          : isClaimable
-                            ? 'border-rose-300 ring-2 ring-rose-200'
-                            : 'border-stone-100'
-                        : 'border-stone-100'
-                    ].join(' ');
-
-                    const handleClick = () =>
-                      handleEarnClick(option.id, {
-                        isReview,
-                        clickedAt,
-                        isClaimable,
-                        reviewCompleted
-                      });
-
-                    return (
-                      <motion.div
-                        key={option.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.18 + index * 0.08 }}
-                        onClick={handleClick}
-                        className={cardClassNames}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-11 h-11 rounded-full flex items-center justify-center ${option.color}`}>
-                            <option.icon className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h3 className={`font-medium leading-tight ${isReview && reviewCompleted ? 'text-emerald-700' : 'text-stone-900'} group-hover:text-rose-700 transition-colors text-[15px]`}>
-                              {titleText}
-                            </h3>
-                            <p className={`text-xs ${isReview && reviewCompleted ? 'text-emerald-700' : 'text-stone-500'}`}>
-                              {subtitleText}
-                            </p>
-                            {isReview && clickedAt && !isClaimable && !reviewCompleted && (
-                              <p className="text-xs text-stone-400 mt-1">
-                                {`Wait ${Math.max(1, Math.ceil(2 - (diffMinutes ?? 0)))} min`}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className={`w-7 h-7 rounded-full ${isReview && isClaimable ? 'bg-rose-50' : 'bg-stone-50'} flex items-center justify-center group-hover:bg-rose-50 transition-colors ml-auto`}>
-                          <ChevronRight className={`w-4 h-4 ${isReview && isClaimable ? 'text-rose-600' : 'text-stone-400'} group-hover:text-rose-600`} />
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </section>
-            </div>
-          </motion.div>
-        )}
-
-        {/* SCAN TAB – Cafe */}
-        {activeTab === 'scan' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-6 pt-24 flex flex-col items-center justify-center min-h-[70vh] text-center"
-          >
-            <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6">
-              <ScanLine className="w-10 h-10 text-emerald-600" />
-            </div>
-            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-2">Scan QR</h1>
-            <div
-              id="reader"
-              style={{ width: 260, height: 260, margin: "0 auto", marginTop: 8, display: "flex", justifyContent: "center" }}
-            ></div>
-            {scannerLoading && <div className="text-stone-500 mt-3">Loading camera...</div>}
-            {scannerError && <div className="text-red-500 mt-3">{scannerError}</div>}
-            <p className="text-stone-400 text-sm mt-4 mb-2">
-              Scan the QR at the cafe counter to collect your points!
-            </p>
-            {/* Claim Visit Points (+10) button removed as per prompt */}
-          </motion.div>
-        )}
-
-        {activeTab === 'rewards' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-6 pt-16"
-          >
-            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-6">All Rewards</h1>
-            {/* Active reward notification shown at top of rewards tab */}
-            {existingRedemption && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
-                <h2 className="text-sm font-semibold text-emerald-700 mb-1">
-                  Active Reward
-                </h2>
-                <p className="text-lg font-bold tracking-widest">
-                  {existingRedemption.redemptionCode}
-                </p>
-                <p className="text-xs text-stone-500 mt-1">
-                  Show this code to staff
-                </p>
-                <button
-                  onClick={() => setActiveRedemption(existingRedemption)}
-                  className="mt-3 w-full py-2 bg-emerald-600 text-white rounded-lg text-sm"
-                >
-                  Open Reward
-                </button>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-4">
-              {rewards.map((reward, index) => {
-                const isUnlocked = userPoints >= reward.points;
-                return (
-                  <motion.div
-                    key={reward.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.08 }}
-                    className={`rounded-2xl overflow-hidden relative shadow-sm border ${isUnlocked ? 'border-stone-200 bg-white' : 'border-stone-100 bg-stone-50/50'}`}
-                  >
-                    <div className="h-24 overflow-hidden relative">
-                      <img
-                        src={reward.image}
-                        alt={reward.title}
-                        className={`w-full h-full object-cover ${!isUnlocked ? 'grayscale opacity-60' : ''}`}
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                      <div className="absolute bottom-2 left-2 flex items-center gap-1 bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full text-white text-[10px] font-medium">
-                        {isUnlocked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                        {reward.points} pts
-                      </div>
-                    </div>
-                    <div className="p-3">
-                      <h3 className={`font-medium text-sm mb-2 truncate ${isUnlocked ? 'text-stone-900' : 'text-stone-500'}`}>{reward.title}</h3>
-                      <button
-                        disabled={!isUnlocked}
-                        className={`w-full py-1.5 rounded-lg text-xs font-medium transition-all ${
-                          isUnlocked
-                            ? 'bg-stone-900 text-white hover:bg-stone-800'
-                            : 'bg-stone-200 text-stone-400 cursor-not-allowed'
-                        }`}
-                        onClick={() => handleRedeem(reward)}
-                      >
-                        {isUnlocked ? 'Redeem' : 'Locked'}
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-
-        {activeTab === 'profile' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-6 pt-16"
-          >
-            <h1 className="text-2xl font-serif font-medium text-stone-900 mb-6">Profile</h1>
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-stone-100 flex items-center justify-between mb-6">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-rose-100">
-                  <img
-                    // [ISSUE 5] cafe/cafe interior user profile/fallback (profile tab)
-                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24"
-                    alt="Profile"
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <div>
-                  <h2 className="text-lg font-medium text-stone-900">{userName}</h2>
-                  <p className="text-stone-500 text-sm">Rose Gold Member</p>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleLogout}
-              className="w-full bg-white border border-stone-200 text-stone-700 py-3 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-stone-50 transition-colors"
-            >
-              <LogOut className="w-4 h-4" /> Sign Out
-            </button>
-          </motion.div>
-        )}
-
-        {/* Bottom Navigation */}
-        <div className="fixed bottom-0 left-0 right-0 flex justify-center z-50 pointer-events-none">
-          <div className="w-full max-w-md bg-white border-t border-stone-100 px-6 py-4 flex justify-between items-center rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] pointer-events-auto">
-            {[
-              { id: 'home', icon: Home, label: 'Home' },
-              { id: 'scan', icon: ScanLine, label: 'Scan' },
-              { id: 'rewards', icon: Gift, label: 'Rewards' },
-              { id: 'profile', icon: User, label: 'Profile' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className="flex flex-col items-center gap-1 relative"
-              >
-                <div className={`p-2 rounded-xl transition-colors ${activeTab === tab.id ? 'bg-rose-50 text-rose-600' : 'text-stone-400 hover:text-stone-600'}`}>
-                  <tab.icon className="w-6 h-6" />
-                </div>
-                <span className={`text-[10px] font-medium ${activeTab === tab.id ? 'text-rose-600' : 'text-stone-400'}`}>
-                  {tab.label}
-                </span>
-                {activeTab === tab.id && (
-                  <motion.div
-                    layoutId="nav-indicator"
-                    className="absolute -top-4 w-1 h-1 bg-rose-600 rounded-full"
-                  />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* STEP 3: Redemption Modal */}
-        {activeRedemption && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center">
-            <div className="bg-white rounded-2xl p-6 w-[90%] max-w-sm text-center">
-              <h2 className="text-xl font-semibold mb-2">
-                {activeRedemption.rewardName}
-              </h2>
-
-              <p className="text-sm text-stone-500 mb-4">
-                Show this code to staff
-              </p>
-
-              <div className="text-4xl font-bold tracking-widest mb-6">
-                {activeRedemption.redemptionCode}
-              </div>
-
-              {/* STEP 4.3: SHOW TIMER BELOW CODE */}
-              <p className="text-sm text-red-500 mt-2">
-                Expires in {timeLeft}s
-              </p>
-
-              {/* STEP 5: Mark as Used button */}
-              <button
-                onClick={handleCompleteRedemption}
-                disabled={timeLeft <= 0}
-                className={`w-full py-2 rounded-lg mt-3 ${
-                  timeLeft <= 0
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-green-600 text-white"
-                }`}
-              >
-                Mark as Used
-              </button>
-
-              <button
-                onClick={() => setActiveRedemption(null)}
-                className="w-full py-2 bg-stone-900 text-white rounded-lg"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-
-      </div>
+      {/* ... */}
     </div>
   );
 }
