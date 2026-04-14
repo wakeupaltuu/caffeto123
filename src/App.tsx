@@ -442,7 +442,8 @@ export default function App() {
           userId: user.uid,
           bizId: BIZ_ID,
           totalPoints: priorPoints + 10,
-          lastVisitAt: new Date().toISOString()
+          lastVisitAt: new Date().toISOString(), // ✅ comma here
+          visitsCount: (stats?.visitsCount ?? 0) + 1
         },
         { merge: true }
       );
@@ -450,7 +451,8 @@ export default function App() {
       setStats((prev: any) => ({
         ...prev,
         totalPoints: priorPoints + 10,
-        lastVisitAt: new Date().toISOString()
+        lastVisitAt: new Date().toISOString(),
+        visitsCount: (prev?.visitsCount ?? 0) + 1
       }));
 
       alert("☕ +10 points for visiting the cafe!");
