@@ -88,6 +88,7 @@ export default function App() {
 
   const html5QrcodeScannerRef = useRef<any>(null);
   const scannerMountedRef = useRef(false);
+  const hasScannedRef = useRef(false);
 
   // STEP 1: ADD STATE (top with other useState)
   const [activeRedemption, setActiveRedemption] = useState<any>(null);
@@ -618,6 +619,8 @@ export default function App() {
 
   // [ISSUE 1] Secure QR SCAN HANDLER (Accept ONLY valid code)
   useEffect(() => {
+  
+
     const runScanner = async () => {
       if (activeTab !== 'scan') {
         if (scannerMountedRef.current && html5QrcodeScannerRef.current) {
@@ -627,6 +630,8 @@ export default function App() {
           html5QrcodeScannerRef.current.clear();
         }
         scannerMountedRef.current = false;
+        // Reset scan lock on exit
+        hasScannedRef.current = false;
         return;
       }
       setScannerLoading(true);
@@ -638,6 +643,7 @@ export default function App() {
       } catch (err) {
         setScannerError("Failed to load QR scanner library.");
         setScannerLoading(false);
+        hasScannedRef.current = false;
         return;
       }
       if (scannerMountedRef.current) return;
@@ -646,11 +652,11 @@ export default function App() {
       if (!readerElem) {
         setScannerError("Scanner DOM not ready");
         setScannerLoading(false);
+        hasScannedRef.current = false;
         return;
       }
       const html5QrInst = new Html5Qrcode("reader");
       html5QrcodeScannerRef.current = html5QrInst;
-      let stopped = false;
       try {
         const config = { fps: 10, qrbox: { width: 200, height: 200 } };
         await html5QrInst.start(
@@ -658,8 +664,8 @@ export default function App() {
           config,
           // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
-            if (stopped) return;
-            stopped = true;
+            if (hasScannedRef.current) return;
+            hasScannedRef.current = true;
 
             setScannerLoading(true);
 
@@ -673,6 +679,7 @@ export default function App() {
               alert("Invalid QR Code ❌");
               setScannerLoading(false);
               scannerMountedRef.current = false;
+              hasScannedRef.current = false; // Reset for next scan
               setActiveTab('home');
               return;
             }
@@ -689,6 +696,7 @@ export default function App() {
             await claimVisit(true);
             setScannerLoading(false);
             scannerMountedRef.current = false;
+            hasScannedRef.current = false; // Reset for next scan
             setActiveTab('home');
           },
           (error: any) => {
@@ -700,6 +708,7 @@ export default function App() {
         setScannerError(typeof err === 'string' ? err : "Camera permission denied or unavailable.");
         setScannerLoading(false);
         scannerMountedRef.current = false;
+        hasScannedRef.current = false;
       }
       // Cleanup on unmount or tab change
       return () => {
@@ -709,6 +718,7 @@ export default function App() {
           html5QrcodeScannerRef.current.clear();
         }
         html5QrcodeScannerRef.current = null;
+        hasScannedRef.current = false; // Always reset scan lock in cleanup
       };
     };
 
