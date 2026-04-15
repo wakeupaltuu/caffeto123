@@ -463,13 +463,7 @@ export default function App() {
         { merge: true }
       );
 
-      setStats((prev: any) => ({
-        ...prev,
-        totalPoints: (prev?.totalPoints ?? 0) + 10,
-        lastVisitAt: new Date().toISOString(),
-        visitsCount: (prev?.visitsCount ?? 0) + 1
-      }));
-
+     
       alert("☕ +10 points for visiting the cafe!");
     } catch (err) {
       alert("Error awarding visit points.");
