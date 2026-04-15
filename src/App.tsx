@@ -32,7 +32,8 @@ import {
   where,
   getDocs,
   collection,
-  increment 
+  increment,
+  runTransaction
 } from "firebase/firestore";
 import { addDoc } from "firebase/firestore"; // Already included above in full collection import
 
@@ -425,6 +426,8 @@ export default function App() {
   // ====== [ISSUE 2, FIXED, see below] ======
   // Updated per prompt: claimVisit takes isValidScan = false by default. If false, blocks with alert.
 
+  
+
   const claimVisit = async (isValidScan = false) => {
     if (!user) return;
 
@@ -437,33 +440,47 @@ export default function App() {
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
     try {
-      // Read existing document BEFORE updating
-      const docSnap = await getDoc(statsRef);
+      await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(statsRef);
 
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const lastVisit = data.lastVisitAt ? new Date(data.lastVisitAt).getTime() : 0;
         const now = Date.now();
 
-        if (now - lastVisit < 10000) {
-          console.log("Duplicate scan blocked");
-          return;
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const lastVisit = data.lastVisitAt
+            ? new Date(data.lastVisitAt).getTime()
+            : 0;
+
+          if (now - lastVisit < 10000) {
+            console.log("Duplicate blocked");
+            return;
+          }
+
+          transaction.set(
+            statsRef,
+            {
+              userId: user.uid,
+              bizId: BIZ_ID,
+              totalPoints: increment(10),
+              visitsCount: increment(1),
+              lastVisitAt: new Date().toISOString()
+            },
+            { merge: true }
+          );
+        } else {
+          transaction.set(
+            statsRef,
+            {
+              userId: user.uid,
+              bizId: BIZ_ID,
+              totalPoints: 10,
+              visitsCount: 1,
+              lastVisitAt: new Date().toISOString()
+            }
+          );
         }
-      }
+      });
 
-      await setDoc(
-        statsRef,
-        {
-          userId: user.uid,
-          bizId: BIZ_ID,
-          totalPoints: increment(10),
-          lastVisitAt: new Date().toISOString(),
-          visitsCount: increment(1)
-        },
-        { merge: true }
-      );
-
-     
       alert("☕ +10 points for visiting the cafe!");
     } catch (err) {
       alert("Error awarding visit points.");
