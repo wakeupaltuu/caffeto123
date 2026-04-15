@@ -437,6 +437,20 @@ export default function App() {
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
     try {
+      // Read existing document BEFORE updating
+      const docSnap = await getDoc(statsRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const lastVisit = data.lastVisitAt ? new Date(data.lastVisitAt).getTime() : 0;
+        const now = Date.now();
+
+        if (now - lastVisit < 10000) {
+          console.log("Duplicate scan blocked");
+          return;
+        }
+      }
+
       await setDoc(
         statsRef,
         {
