@@ -31,7 +31,8 @@ import {
   query,
   where,
   getDocs,
-  collection
+  collection,
+  increment 
 } from "firebase/firestore";
 import { addDoc } from "firebase/firestore"; // Already included above in full collection import
 
@@ -423,6 +424,7 @@ export default function App() {
 
   // ====== [ISSUE 2, FIXED, see below] ======
   // Updated per prompt: claimVisit takes isValidScan = false by default. If false, blocks with alert.
+
   const claimVisit = async (isValidScan = false) => {
     if (!user) return;
 
@@ -434,24 +436,22 @@ export default function App() {
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
 
-    const priorPoints = stats?.totalPoints ?? 0;
-
     try {
       await setDoc(
         statsRef,
         {
           userId: user.uid,
           bizId: BIZ_ID,
-          totalPoints: priorPoints + 10,
-          lastVisitAt: new Date().toISOString(), // ✅ comma here
-          visitsCount: (stats?.visitsCount ?? 0) + 1
+          totalPoints: increment(10),
+          lastVisitAt: new Date().toISOString(),
+          visitsCount: increment(1)
         },
         { merge: true }
       );
 
       setStats((prev: any) => ({
         ...prev,
-        totalPoints: priorPoints + 10,
+        totalPoints: (prev?.totalPoints ?? 0) + 10,
         lastVisitAt: new Date().toISOString(),
         visitsCount: (prev?.visitsCount ?? 0) + 1
       }));
