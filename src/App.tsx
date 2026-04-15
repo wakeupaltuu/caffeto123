@@ -673,11 +673,17 @@ export default function App() {
           // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
             if (hasScannedRef.current) return;
+
             hasScannedRef.current = true;
+            
+            // HARD STOP: prevent any further execution instantly
+            setTimeout(() => {
+              hasScannedRef.current = true;
+            }, 0);
 
             setScannerLoading(true);
 
-            await html5QrInst.stop();
+            html5QrInst.stop().catch(() => {});
             html5QrcodeScannerRef.current = null;
 
             // === REWRITTEN QR CALLBACK LOGIC: Only allow "VISIT_CAFFETO_123" strict ===
