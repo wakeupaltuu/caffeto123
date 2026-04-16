@@ -709,9 +709,9 @@ export default function App() {
       const html5QrInst = new Html5Qrcode("reader");
       html5QrcodeScannerRef.current = html5QrInst;
       try {
-        const config = { fps: 10, qrbox: { width: 200, height: 200 } };
+        const config = { fps: 10 };
         await html5QrInst.start(
-          { facingMode: "environment" },
+          { facingMode: { ideal: "environment" } },
           config,
           // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
@@ -1176,7 +1176,7 @@ export default function App() {
             <h1 className="text-2xl font-serif font-medium text-stone-900 mb-2">Scan QR</h1>
             <div
               id="reader"
-              style={{ width: 260, height: 260, margin: "0 auto", marginTop: 8, display: "flex", justifyContent: "center" }}
+              style={{ width: 320, height: 320, margin: "0 auto", marginTop: 8, display: "flex", justifyContent: "center" }}
             ></div>
             {scannerLoading && <div className="text-stone-500 mt-3">Loading camera...</div>}
             {scannerError && <div className="text-red-500 mt-3">{scannerError}</div>}
