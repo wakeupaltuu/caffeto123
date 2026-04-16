@@ -709,21 +709,11 @@ export default function App() {
       const html5QrInst = new Html5Qrcode("reader");
       html5QrcodeScannerRef.current = html5QrInst;
       try {
-        const config = { fps: 10 };
-        // Use Html5Qrcode.getCameras() to select first available camera
-        const devices = await Html5Qrcode.getCameras();
-        if (!devices || devices.length === 0) {
-          setScannerError("No cameras found on this device.");
-          setScannerLoading(false);
-          hasScannedRef.current = false;
-          scannerMountedRef.current = false;
-          return;
-        }
-        const firstCameraId = devices[0].id;
+        const config = { fps: 15 };
+      
         await html5QrInst.start(
-          { deviceId: { exact: firstCameraId } },
+          { facingMode: "environment" },
           config,
-
           // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
             if (hasScannedRef.current) return;
