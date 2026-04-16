@@ -729,14 +729,38 @@ export default function App() {
             html5QrInst.stop().catch(() => {});
             html5QrcodeScannerRef.current = null;
 
-            // === REWRITTEN QR CALLBACK LOGIC: Only allow "VISIT_CAFFETO_123" strict ===
-            const VALID_QR = "VISIT_CAFFETO_123";
+            // === DYNAMIC QR CALLBACK LOGIC ===
+            // QR format: "<shopId>_<timeBlock>"
+        
             const cleanedText = typeof decodedText === 'string' ? decodedText.trim() : '';
-            if (cleanedText !== VALID_QR) {
+            const parts = cleanedText.split("_");
+
+            if (parts.length !== 2) {
               alert("Invalid QR Code ❌");
               setScannerLoading(false);
               scannerMountedRef.current = false;
               hasScannedRef.current = false; // Reset for next scan
+              setActiveTab('home');
+              return;
+            }
+
+            const [shopId, qrBlockStr] = parts;
+            if (shopId !== BIZ_ID) {
+              alert("Wrong shop QR ❌");
+              setScannerLoading(false);
+              scannerMountedRef.current = false;
+              hasScannedRef.current = false;
+              setActiveTab('home');
+              return;
+            }
+
+            const nowBlock = Math.floor(Date.now() / 30000);
+            const qrBlock = Number(qrBlockStr);
+            if (!Number.isFinite(qrBlock) || Math.abs(nowBlock - qrBlock) > 1) {
+              alert("QR expired ❌\n(Scan must be recent, try again)");
+              setScannerLoading(false);
+              scannerMountedRef.current = false;
+              hasScannedRef.current = false;
               setActiveTab('home');
               return;
             }
