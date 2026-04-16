@@ -14,6 +14,7 @@ import {
   Unlock,
   LogOut
 } from 'lucide-react';
+
 import { auth, db } from './firebase';
 import {
   createUserWithEmailAndPassword,
@@ -22,6 +23,7 @@ import {
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
+
 import {
   doc,
   setDoc,
@@ -35,9 +37,10 @@ import {
   increment,
   runTransaction
 } from "firebase/firestore";
+
 import { addDoc } from "firebase/firestore"; // Already included above in full collection import
 
-// 🟡 [ISSUE 8] Extract constants:
+// 🟡 [ISSUE 8] Extract constants:  
 const GOOGLE_REVIEW_URL = "https://g.page/r/YOUR_GOOGLE_REVIEW_LINK/review"; // Replace with actual business Google review link
 const SHARE_TITLE = "Join & Earn Rewards";
 const SHARE_TEXT = "Earn rewards with this app!";
@@ -86,7 +89,10 @@ export default function App() {
     }, 1000); // shorter interval for countdown accuracy (ISSUE 6)
     return () => clearInterval(interval);
   }, []);
+   
   // ============================================
+
+
 
   const html5QrcodeScannerRef = useRef<any>(null);
   const scannerMountedRef = useRef(false);
@@ -442,20 +448,20 @@ export default function App() {
     try {
       await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(statsRef);
-
+    
         const now = Date.now();
-
+    
         if (docSnap.exists()) {
           const data = docSnap.data();
           const lastVisit = data.lastVisitAt
             ? new Date(data.lastVisitAt).getTime()
             : 0;
-
+    
           if (now - lastVisit < 10000) {
             console.log("Duplicate blocked");
             return;
           }
-
+    
           transaction.set(
             statsRef,
             {
@@ -480,12 +486,20 @@ export default function App() {
           );
         }
       });
-
+    
+      // ✅ NEW: create visit event (for dashboard graph)
+      await addDoc(collection(db, "visits"), {
+        userId: user.uid,
+        shopId: BIZ_ID,
+        timestamp: new Date()
+      });
+    
       alert("☕ +10 points for visiting the cafe!");
+    
     } catch (err) {
+      console.error("Visit error:", err);
       alert("Error awarding visit points.");
     }
-  };
   // ======================================================================
 
   // ----------- Premium Loyalty Card Calculations ------------
