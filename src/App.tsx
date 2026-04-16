@@ -457,10 +457,21 @@ export default function App() {
             ? new Date(data.lastVisitAt).getTime()
             : 0;
     
-          if (now - lastVisit < 10000) {
-            console.log("Duplicate blocked");
-            return;
-          }
+            if (now - lastVisit < 10000) {
+              console.log("Duplicate blocked");
+            } else {
+              transaction.set(
+                statsRef,
+                {
+                  userId: user.uid,
+                  bizId: BIZ_ID,
+                  totalPoints: increment(10),
+                  visitsCount: increment(1),
+                  lastVisitAt: new Date().toISOString()
+                },
+                { merge: true }
+              );
+            }
     
           transaction.set(
             statsRef,
@@ -500,6 +511,7 @@ export default function App() {
       console.error("Visit error:", err);
       alert("Error awarding visit points.");
     }
+  };
   // ======================================================================
 
   // ----------- Premium Loyalty Card Calculations ------------
