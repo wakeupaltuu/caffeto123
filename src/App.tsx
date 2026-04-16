@@ -711,7 +711,7 @@ export default function App() {
       try {
         const config = { fps: 10 };
         await html5QrInst.start(
-          { facingMode: { ideal: "environment" } },
+          { facingMode: { exact: "environment" } },
           config,
           // [SECURE SCANNER CALLBACK - CRITICAL]
           async (decodedText: string) => {
