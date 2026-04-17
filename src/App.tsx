@@ -72,11 +72,15 @@ function Toast({ message, visible }: { message: string; visible: boolean }) {
     <AnimatePresence>
       {visible && (
         <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 40 }}
-          transition={{ duration: 0.28 }}
-          className="fixed left-1/2 -translate-x-1/2 bottom-8 z-[99] select-none px-6 py-3 rounded-xl bg-stone-900 text-white shadow-lg text-sm font-medium pointer-events-none"
+          initial={{ opacity: 0, y: 60, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 40, scale: 0.95 }}
+          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[99] 
+          select-none px-5 py-2.5 rounded-xl 
+          bg-stone-900/90 backdrop-blur-lg 
+          text-white shadow-xl text-sm font-medium 
+          border border-white/10 pointer-events-none"
           style={{ minWidth: 200, textAlign: 'center' }}
         >
           {message}
@@ -136,7 +140,8 @@ export default function App() {
 
   // STEP 4.1: ADD TIMER STATE
   const [timeLeft, setTimeLeft] = useState(15 * 60);
-
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
   // STEP 5: ADD handleCompleteRedemption function
   const handleCompleteRedemption = async () => {
     if (!activeRedemption || !user || !stats) return;
@@ -1367,7 +1372,7 @@ export default function App() {
 
               {/* STEP 4.3: SHOW TIMER BELOW CODE */}
               <p className="text-sm text-red-500 mt-2">
-                Expires in {timeLeft}s
+                ⏳ {minutes}:{seconds.toString().padStart(2, '0')} remaining
               </p>
 
               {/* STEP 5: Mark as Used button */}
