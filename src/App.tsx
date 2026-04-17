@@ -1,3 +1,5 @@
+
+  // ---- loyalty app code ----
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
@@ -433,46 +435,37 @@ export default function App() {
   // Updated per prompt: claimVisit takes isValidScan = false by default. If false, blocks with alert.
 
   
-
   const claimVisit = async (isValidScan = false) => {
     if (!user) return;
-
+  
     if (!isValidScan) {
       alert("Unauthorized action blocked ❌");
       return;
     }
-
+  
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
-
+  
     try {
+      let shouldAddVisit = false;
+  
       await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(statsRef);
-    
         const now = Date.now();
-    
+  
         if (docSnap.exists()) {
           const data = docSnap.data();
           const lastVisit = data.lastVisitAt
             ? new Date(data.lastVisitAt).getTime()
             : 0;
-    
-            if (now - lastVisit < 10000) {
-              console.log("Duplicate blocked");
-            } else {
-              transaction.set(
-                statsRef,
-                {
-                  userId: user.uid,
-                  bizId: BIZ_ID,
-                  totalPoints: increment(10),
-                  visitsCount: increment(1),
-                  lastVisitAt: new Date().toISOString()
-                },
-                { merge: true }
-              );
-            }
-    
+  
+          if (now - lastVisit < 10000) {
+            console.log("Duplicate blocked");
+            return;
+          }
+  
+          shouldAddVisit = true;
+  
           transaction.set(
             statsRef,
             {
@@ -484,29 +477,30 @@ export default function App() {
             },
             { merge: true }
           );
+  
         } else {
-          transaction.set(
-            statsRef,
-            {
-              userId: user.uid,
-              bizId: BIZ_ID,
-              totalPoints: 10,
-              visitsCount: 1,
-              lastVisitAt: new Date().toISOString()
-            }
-          );
+          shouldAddVisit = true;
+  
+          transaction.set(statsRef, {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: 10,
+            visitsCount: 1,
+            lastVisitAt: new Date().toISOString()
+          });
         }
       });
-    
-      // ✅ NEW: create visit event (for dashboard graph)
-      await addDoc(collection(db, "visits"), {
-        userId: user.uid,
-        shopId: BIZ_ID,
-        timestamp: new Date()
-      });
-    
-      alert("☕ +10 points for visiting the cafe!");
-    
+  
+      if (shouldAddVisit) {
+        await addDoc(collection(db, "visits"), {
+          userId: user.uid,
+          shopId: BIZ_ID,
+          timestamp: new Date()
+        });
+  
+        alert("☕ +10 points for visiting the cafe!");
+      }
+  
     } catch (err) {
       console.error("Visit error:", err);
       alert("Error awarding visit points.");
