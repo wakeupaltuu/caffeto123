@@ -1,7 +1,7 @@
 
   // ---- loyalty app code ----
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Home,
   ScanLine,
@@ -66,6 +66,26 @@ const playSuccessSound = () => {
   audio.play().catch(() => {});
 };
 
+// Toast Component and Toast Hook (Minimal, lightweight)
+function Toast({ message, visible }: { message: string; visible: boolean }) {
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 40 }}
+          transition={{ duration: 0.28 }}
+          className="fixed left-1/2 -translate-x-1/2 bottom-8 z-[99] select-none px-6 py-3 rounded-xl bg-stone-900 text-white shadow-lg text-sm font-medium pointer-events-none"
+          style={{ minWidth: 200, textAlign: 'center' }}
+        >
+          {message}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -78,6 +98,16 @@ export default function App() {
   const [name, setName] = useState('');
   const [authError, setAuthError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // === Toast State ===
+  const [toast, setToast] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  // Utility: show toast message for 2 seconds (or replace if one showing)
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setToastVisible(true);
+    setTimeout(() => setToastVisible(false), 2000);
+  };
 
   // === Camera Scanner State ===
   const [scannerLoading, setScannerLoading] = useState(false);
@@ -93,8 +123,6 @@ export default function App() {
   }, []);
    
   // ============================================
-
-
 
   const html5QrcodeScannerRef = useRef<any>(null);
   const scannerMountedRef = useRef(false);
@@ -115,7 +143,7 @@ export default function App() {
     try {
       // 1. Check if already expired
       if (timeLeft <= 0) {
-        alert("Code expired");
+        showToast("Code expired");
         return;
       }
 
@@ -145,10 +173,10 @@ export default function App() {
       setActiveRedemption(null);
 
       // 6. Success feedback
-      alert("Reward Redeemed 🎉");
+      showToast("Reward Redeemed 🎉");
     } catch (error) {
       console.error("Completion error:", error);
-      alert("Something went wrong");
+      showToast("Something went wrong");
     }
   };
 
@@ -227,7 +255,7 @@ export default function App() {
           status: "expired"
         }).catch(() => {});
 
-        alert("Code expired ⏱️");
+        showToast("Code expired ⏱️");
         setActiveRedemption(null);
       }
     }, 1000);
@@ -362,7 +390,7 @@ export default function App() {
         }
       }
     } catch (error) {
-      alert("Error claiming review reward.");
+      showToast("Error claiming review reward.");
     }
   };
 
@@ -378,7 +406,7 @@ export default function App() {
     try {
       userSnap = await getDoc(userRef);
     } catch (err) {
-      alert("Could not read user data.");
+      showToast("Could not read user data.");
       return;
     }
     let lastClaimISO: string | null | undefined = null;
@@ -419,15 +447,15 @@ export default function App() {
           ...prev,
           lastDailyClaimAt: nowDate.toISOString()
         }));
-        alert("🎉 +5 points claimed!");
+        showToast("🎉 +5 points claimed!");
       } catch (err) {
-        alert("Error claiming daily reward.");
+        showToast("Error claiming daily reward.");
       }
     } else {
       const last = lastClaimISO ? new Date(lastClaimISO) : null;
       const diffHours = last ? ((nowDate.getTime() - last.getTime()) / (1000 * 60 * 60)) : 999;
       const remaining = Math.ceil(24 - diffHours);
-      alert(`Come back in ${remaining} hrs`);
+      showToast(`Come back in ${remaining} hrs`);
     }
   };
 
@@ -439,7 +467,7 @@ export default function App() {
     if (!user) return;
   
     if (!isValidScan) {
-      alert("Unauthorized action blocked ❌");
+      showToast("Unauthorized action blocked ❌");
       return;
     }
   
@@ -460,7 +488,8 @@ export default function App() {
             : 0;
   
           if (now - lastVisit < 10000) {
-            console.log("Duplicate blocked");
+            // console.log("Duplicate blocked");
+            showToast("Duplicate blocked");
             return;
           }
   
@@ -468,7 +497,7 @@ export default function App() {
   
           transaction.set(
             statsRef,
-            {
+            { 
               userId: user.uid,
               bizId: BIZ_ID,
               totalPoints: increment(10),
@@ -498,12 +527,12 @@ export default function App() {
           timestamp: new Date()
         });
   
-        alert("☕ +10 points for visiting the cafe!");
+        showToast("☕ +10 points for visiting the cafe!");
       }
   
     } catch (err) {
       console.error("Visit error:", err);
-      alert("Error awarding visit points.");
+      showToast("Error awarding visit points.");
     }
   };
   // ======================================================================
@@ -539,7 +568,7 @@ export default function App() {
     if (!user || !stats) return;
 
     if ((stats.totalPoints ?? 0) < reward.points) {
-      alert("Not enough points");
+      showToast("Not enough points");
       return;
     }
 
@@ -554,7 +583,7 @@ export default function App() {
       const snapshot = await getDocs(q);
 
       if (!snapshot.empty) {
-        alert("You already have an active reward. Please use it first.");
+        showToast("You already have an active reward. Please use it first.");
         return;
       }
 
@@ -589,10 +618,10 @@ export default function App() {
       // STEP 4.4: RESET TIMER ON NEW REDEMPTION
       setTimeLeft(15 * 60);
 
-      console.log("Redemption created:", redemptionData);
+      // console.log("Redemption created:", redemptionData);
     } catch (error) {
       console.error("Redemption error:", error);
-      alert("Something went wrong");
+      showToast("Something went wrong");
     }
   };
 
@@ -626,10 +655,10 @@ export default function App() {
         });
       } else {
         await navigator.clipboard.writeText(SHARE_URL);
-        alert("Copied link to clipboard! Paste to share.");
+        showToast("Copied link to clipboard! Paste to share.");
       }
     } catch (e) {
-      alert("Couldn't share.");
+      showToast("Couldn't share.");
     }
   };
 
@@ -664,8 +693,6 @@ export default function App() {
 
   // [ISSUE 1] Secure QR SCAN HANDLER (Accept ONLY valid code)
   useEffect(() => {
-  
-
     const runScanner = async () => {
       if (activeTab !== 'scan') {
         if (scannerMountedRef.current && html5QrcodeScannerRef.current) {
@@ -731,32 +758,32 @@ export default function App() {
             const parts = cleanedText.split("_");
 
             if (parts.length !== 2) {
-              alert("Invalid QR Code ❌");
+              showToast("Invalid QR Code ❌");
               setScannerLoading(false);
               scannerMountedRef.current = false;
               hasScannedRef.current = false; // Reset for next scan
-              setActiveTab('home');
+              setTimeout(() => setActiveTab('home'), 800);
               return;
             }
 
             const [shopId, qrBlockStr] = parts;
             if (shopId !== BIZ_ID) {
-              alert("Wrong shop QR ❌");
+              showToast("Wrong shop QR ❌");
               setScannerLoading(false);
               scannerMountedRef.current = false;
               hasScannedRef.current = false;
-              setActiveTab('home');
+              setTimeout(() => setActiveTab('home'), 800);
               return;
             }
 
             const nowBlock = Math.floor(Date.now() / 30000);
             const qrBlock = Number(qrBlockStr);
             if (!Number.isFinite(qrBlock) || Math.abs(nowBlock - qrBlock) > 1) {
-              alert("QR expired ❌\n(Scan must be recent, try again)");
+              showToast("QR expired ❌\n(Scan must be recent, try again)");
               setScannerLoading(false);
               scannerMountedRef.current = false;
               hasScannedRef.current = false;
-              setActiveTab('home');
+              setTimeout(() => setActiveTab('home'), 800);
               return;
             }
 
@@ -773,7 +800,7 @@ export default function App() {
             setScannerLoading(false);
             scannerMountedRef.current = false;
             hasScannedRef.current = false; // Reset for next scan
-            setActiveTab('home');
+            setTimeout(() => setActiveTab('home'), 800);
           },
           (error: any) => {
             // Optionally show scan errors here
@@ -889,6 +916,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-stone-50 font-sans text-stone-800 pb-24 flex justify-center">
       <div className="w-full max-w-md bg-stone-50 min-h-screen shadow-2xl relative overflow-hidden">
+
+        {/* Toast Notification */}
+        <Toast message={toast} visible={toastVisible} />
 
         {activeTab === 'home' && (
           <motion.div
