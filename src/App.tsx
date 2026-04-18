@@ -455,15 +455,21 @@ export default function App() {
       return;
     }
   
+    const pointsEarned = 10;
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
+    const nowDate = new Date();
+    const visitTimestamp = nowDate.toISOString();
+    const dateKey = visitTimestamp.slice(0, 10); // YYYY-MM-DD
+    const dailyStatsId = `${BIZ_ID}_${dateKey}`;
+    const dailyStatsRef = doc(db, "dailyBusinessStats", dailyStatsId);
   
     try {
       let shouldAddVisit = false;
   
       await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(statsRef);
-        const now = Date.now();
+        const now = nowDate.getTime();
   
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -476,39 +482,39 @@ export default function App() {
             showToast("Duplicate blocked");
             return;
           }
-  
-          shouldAddVisit = true;
-  
-          transaction.set(
-            statsRef,
-            { 
-              userId: user.uid,
-              bizId: BIZ_ID,
-              totalPoints: increment(10),
-              visitsCount: increment(1),
-              lastVisitAt: new Date().toISOString()
-            },
-            { merge: true }
-          );
-  
-        } else {
-          shouldAddVisit = true;
-  
-          transaction.set(statsRef, {
+        }
+
+        shouldAddVisit = true;
+
+        transaction.set(
+          statsRef,
+          {
             userId: user.uid,
             bizId: BIZ_ID,
-            totalPoints: 10,
-            visitsCount: 1,
-            lastVisitAt: new Date().toISOString()
-          });
-        }
+            totalPoints: increment(pointsEarned),
+            visitsCount: increment(1),
+            lastVisitAt: visitTimestamp
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          dailyStatsRef,
+          {
+            businessId: BIZ_ID,
+            date: dateKey,
+            visits: increment(1),
+            pointsGiven: increment(pointsEarned)
+          },
+          { merge: true }
+        );
       });
   
       if (shouldAddVisit) {
         await addDoc(collection(db, "visits"), {
           userId: user.uid,
           shopId: BIZ_ID,
-          timestamp: new Date()
+          timestamp: nowDate
         });
   
         showToast("☕ +10 points for visiting the cafe!");
