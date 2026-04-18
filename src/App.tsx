@@ -558,8 +558,6 @@ export default function App() {
 
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, "userBusinessStats", statsId);
-    let didDeductPoints = false;
-    let createdRedemptionId: string | null = null;
 
     try {
       // Optional: ask for confirmation before creating
@@ -585,6 +583,8 @@ export default function App() {
       const nowIso = new Date().toISOString();
       const expiresAtIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
       let updatedPoints = stats.totalPoints ?? 0;
+      let createdRedemptionId = "";
+      const redemptionRef = doc(collection(db, "redemptions"));
 
       const redemptionData = {
         userId: user.uid,
@@ -622,14 +622,13 @@ export default function App() {
           },
           { merge: true }
         );
-      });
-      didDeductPoints = true;
 
-      const docRef = await addDoc(collection(db, "redemptions"), redemptionData);
-      createdRedemptionId = docRef.id;
+        transaction.set(redemptionRef, redemptionData);
+        createdRedemptionId = redemptionRef.id;
+      });
 
       setActiveRedemption({
-        id: docRef.id,
+        id: createdRedemptionId,
         ...redemptionData
       });
       setStats((prev: any) => ({
@@ -647,32 +646,6 @@ export default function App() {
         if (error.message === "INSUFFICIENT_POINTS" || error.message === "NEGATIVE_POINTS_BLOCKED") {
           showToast("Not enough points");
           return;
-        }
-      }
-
-      // If points were deducted but redemption creation failed, rollback points once.
-      // This keeps points/redemption state consistent for users and dashboard analytics.
-      if (didDeductPoints && !createdRedemptionId) {
-        try {
-          await runTransaction(db, async (transaction) => {
-            const snap = await transaction.get(statsRef);
-            const currentPoints = snap.exists() ? (snap.data().totalPoints ?? 0) : 0;
-            transaction.set(
-              statsRef,
-              {
-                userId: user.uid,
-                bizId: BIZ_ID,
-                totalPoints: currentPoints + reward.points
-              },
-              { merge: true }
-            );
-          });
-          setStats((prev: any) => ({
-            ...prev,
-            totalPoints: (prev?.totalPoints ?? 0) + reward.points
-          }));
-        } catch (rollbackError) {
-          console.error("Redemption rollback error:", rollbackError);
         }
       }
 
