@@ -50,7 +50,7 @@ const SHARE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
 const BIZ_ID = "caffeto123"; // Business ID for loyalty program
 
-// Premium Loyalty Card Progress Setup
+// Premium Loyalty Card Progress Setuppppppp
 const LOYALTY_REWARD = {
   nextTitle: 'Free Coffee',
   nextThreshold: 100,
