@@ -140,7 +140,7 @@ export default function App() {
   const seconds = timeLeft % 60;
   // STEP 5: ADD handleCompleteRedemption function
   const handleCompleteRedemption = async () => {
-    if (!activeRedemption || !user || !stats) return;
+    if (!activeRedemption || !user) return;
     try {
       // 1. Check if already expired
       if (timeLeft <= 0) {
@@ -153,27 +153,10 @@ export default function App() {
         status: "completed"
       });
 
-      // 3. Deduct points
-      const statsId = `${user.uid}_${BIZ_ID}`;
-      const statsRef = doc(db, "userBusinessStats", statsId);
-      const newPoints = Math.max(
-        0,
-        (stats.totalPoints ?? 0) - activeRedemption.pointsUsed
-      );
-      await updateDoc(statsRef, {
-        totalPoints: newPoints
-      });
-
-      // 4. Update local state instantly
-      setStats((prev: any) => ({
-        ...prev,
-        totalPoints: newPoints
-      }));
-
-      // 5. Close modal
+      // 3. Close modal
       setActiveRedemption(null);
 
-      // 6. Success feedback
+      // 4. Success feedback
       showToast("Reward Redeemed 🎉");
     } catch (error) {
       console.error("Completion error:", error);
@@ -573,21 +556,12 @@ export default function App() {
       return;
     }
 
-    // 🔴 Check if user already has active redemption
+    const statsId = `${user.uid}_${BIZ_ID}`;
+    const statsRef = doc(db, "userBusinessStats", statsId);
+    let didDeductPoints = false;
+    let createdRedemptionId: string | null = null;
+
     try {
-      const q = query(
-        collection(db, "redemptions"),
-        where("userId", "==", user.uid),
-        where("businessId", "==", BIZ_ID),
-        where("status", "==", "pending")
-      );
-      const snapshot = await getDocs(q);
-
-      if (!snapshot.empty) {
-        showToast("You already have an active reward. Please use it first.");
-        return;
-      }
-
       // Optional: ask for confirmation before creating
       const confirmRedeem = window.confirm(
         `Redeem ${reward.title} for ${reward.points} points?`
@@ -595,7 +569,22 @@ export default function App() {
 
       if (!confirmRedeem) return;
 
+      const pendingQuery = query(
+        collection(db, "redemptions"),
+        where("userId", "==", user.uid),
+        where("businessId", "==", BIZ_ID),
+        where("status", "==", "pending")
+      );
+      const pendingSnapshot = await getDocs(pendingQuery);
+      if (!pendingSnapshot.empty) {
+        showToast("You already have an active reward. Please use it first.");
+        return;
+      }
+
       const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const nowIso = new Date().toISOString();
+      const expiresAtIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      let updatedPoints = stats.totalPoints ?? 0;
 
       const redemptionData = {
         userId: user.uid,
@@ -605,16 +594,48 @@ export default function App() {
         pointsUsed: reward.points,
         status: "pending",
         redemptionCode: code,
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+        createdAt: nowIso,
+        expiresAt: expiresAtIso
       };
 
+      await runTransaction(db, async (transaction) => {
+        const statsSnap = await transaction.get(statsRef);
+
+        const currentPoints = statsSnap.exists() ? (statsSnap.data().totalPoints ?? 0) : 0;
+        if (currentPoints < reward.points) {
+          throw new Error("INSUFFICIENT_POINTS");
+        }
+
+        const newPoints = currentPoints - reward.points;
+        if (newPoints < 0) {
+          throw new Error("NEGATIVE_POINTS_BLOCKED");
+        }
+
+        updatedPoints = newPoints;
+
+        transaction.set(
+          statsRef,
+          {
+            userId: user.uid,
+            bizId: BIZ_ID,
+            totalPoints: newPoints
+          },
+          { merge: true }
+        );
+      });
+      didDeductPoints = true;
+
       const docRef = await addDoc(collection(db, "redemptions"), redemptionData);
+      createdRedemptionId = docRef.id;
 
       setActiveRedemption({
         id: docRef.id,
         ...redemptionData
       });
+      setStats((prev: any) => ({
+        ...prev,
+        totalPoints: updatedPoints
+      }));
 
       // STEP 4.4: RESET TIMER ON NEW REDEMPTION
       setTimeLeft(15 * 60);
@@ -622,6 +643,39 @@ export default function App() {
       // console.log("Redemption created:", redemptionData);
     } catch (error) {
       console.error("Redemption error:", error);
+      if (error instanceof Error) {
+        if (error.message === "INSUFFICIENT_POINTS" || error.message === "NEGATIVE_POINTS_BLOCKED") {
+          showToast("Not enough points");
+          return;
+        }
+      }
+
+      // If points were deducted but redemption creation failed, rollback points once.
+      // This keeps points/redemption state consistent for users and dashboard analytics.
+      if (didDeductPoints && !createdRedemptionId) {
+        try {
+          await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(statsRef);
+            const currentPoints = snap.exists() ? (snap.data().totalPoints ?? 0) : 0;
+            transaction.set(
+              statsRef,
+              {
+                userId: user.uid,
+                bizId: BIZ_ID,
+                totalPoints: currentPoints + reward.points
+              },
+              { merge: true }
+            );
+          });
+          setStats((prev: any) => ({
+            ...prev,
+            totalPoints: (prev?.totalPoints ?? 0) + reward.points
+          }));
+        } catch (rollbackError) {
+          console.error("Redemption rollback error:", rollbackError);
+        }
+      }
+
       showToast("Something went wrong");
     }
   };
