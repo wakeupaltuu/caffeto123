@@ -455,21 +455,15 @@ export default function App() {
       return;
     }
   
-    const pointsEarned = 10;
     const statsId = `${user.uid}_${BIZ_ID}`;
     const statsRef = doc(db, 'userBusinessStats', statsId);
-    const nowDate = new Date();
-    const visitTimestamp = nowDate.toISOString();
-    const dateKey = visitTimestamp.slice(0, 10); // YYYY-MM-DD
-    const dailyStatsId = `${BIZ_ID}_${dateKey}`;
-    const dailyStatsRef = doc(db, "dailyBusinessStats", dailyStatsId);
   
     try {
       let shouldAddVisit = false;
   
       await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(statsRef);
-        const now = nowDate.getTime();
+        const now = Date.now();
   
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -482,39 +476,39 @@ export default function App() {
             showToast("Duplicate blocked");
             return;
           }
-        }
-
-        shouldAddVisit = true;
-
-        transaction.set(
-          statsRef,
-          {
+  
+          shouldAddVisit = true;
+  
+          transaction.set(
+            statsRef,
+            { 
+              userId: user.uid,
+              bizId: BIZ_ID,
+              totalPoints: increment(10),
+              visitsCount: increment(1),
+              lastVisitAt: new Date().toISOString()
+            },
+            { merge: true }
+          );
+  
+        } else {
+          shouldAddVisit = true;
+  
+          transaction.set(statsRef, {
             userId: user.uid,
             bizId: BIZ_ID,
-            totalPoints: increment(pointsEarned),
-            visitsCount: increment(1),
-            lastVisitAt: visitTimestamp
-          },
-          { merge: true }
-        );
-
-        transaction.set(
-          dailyStatsRef,
-          {
-            businessId: BIZ_ID,
-            date: dateKey,
-            visits: increment(1),
-            pointsGiven: increment(pointsEarned)
-          },
-          { merge: true }
-        );
+            totalPoints: 10,
+            visitsCount: 1,
+            lastVisitAt: new Date().toISOString()
+          });
+        }
       });
   
       if (shouldAddVisit) {
         await addDoc(collection(db, "visits"), {
           userId: user.uid,
           shopId: BIZ_ID,
-          timestamp: nowDate
+          timestamp: new Date()
         });
   
         showToast("☕ +10 points for visiting the cafe!");
@@ -604,14 +598,6 @@ export default function App() {
         expiresAt: expiresAtIso
       };
 
-      console.log("[Redeem] Starting transaction", {
-        userId: user.uid,
-        bizId: BIZ_ID,
-        rewardId: reward.id,
-        pointsUsed: reward.points,
-        pendingCheckCount: pendingSnapshot.size
-      });
-
       await runTransaction(db, async (transaction) => {
         const statsSnap = await transaction.get(statsRef);
 
@@ -641,11 +627,6 @@ export default function App() {
         createdRedemptionId = redemptionRef.id;
       });
 
-      console.log("[Redeem] Transaction committed", {
-        redemptionId: createdRedemptionId,
-        status: redemptionData.status
-      });
-
       setActiveRedemption({
         id: createdRedemptionId,
         ...redemptionData
@@ -660,39 +641,7 @@ export default function App() {
 
       // console.log("Redemption created:", redemptionData);
     } catch (error) {
-      const err = error as any;
-      console.error("[Redeem] Transaction failed", {
-        code: err?.code,
-        message: err?.message,
-        name: err?.name,
-        fullError: err
-      });
-
-      // Temporary diagnostic: verify direct addDoc behavior outside transaction.
-      try {
-        const diagnosticDoc = await addDoc(collection(db, "redemptions"), {
-          userId: user.uid,
-          businessId: BIZ_ID,
-          rewardId: reward.id,
-          rewardName: reward.title,
-          pointsUsed: reward.points,
-          status: "pending",
-          redemptionCode: Math.floor(100000 + Math.random() * 900000).toString(),
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-          _diagnosticWrite: true
-        });
-        console.log("[Redeem] Diagnostic addDoc succeeded", { id: diagnosticDoc.id });
-      } catch (diagError) {
-        const diag = diagError as any;
-        console.error("[Redeem] Diagnostic addDoc failed", {
-          code: diag?.code,
-          message: diag?.message,
-          name: diag?.name,
-          fullError: diag
-        });
-      }
-
+      console.error("Redemption error:", error);
       if (error instanceof Error) {
         if (error.message === "INSUFFICIENT_POINTS" || error.message === "NEGATIVE_POINTS_BLOCKED") {
           showToast("Not enough points");
