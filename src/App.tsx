@@ -173,7 +173,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Listen to user profile for name and review data, but NOT points (points are now in userBusinessStats)
+  // Listen to user profileeee for name and review data, but NOT points (points are now in userBusinessStats)
   useEffect(() => {
     if (user && isAuthReady) {
       const unsubscribe = onSnapshot(
@@ -1397,7 +1397,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigatioooon */}
         <div className="fixed bottom-0 left-0 right-0 flex justify-center z-50 pointer-events-none">
           <div className="w-full max-w-md bg-white border-t border-stone-100 px-6 py-4 flex justify-between items-center rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] pointer-events-auto">
             {[
